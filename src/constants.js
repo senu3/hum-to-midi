@@ -1,0 +1,13 @@
+export const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+export const IS_BLACK = [false, true, false, true, false, false, true, false, true, false, true, false];
+export const TPQN = 480;
+export const DEFAULT_BPM = 120;
+export const KB_LO = 36;
+export const KB_HI = 84;
+export const PITCH_MIN_HZ = 60;
+export const PITCH_MAX_HZ = 1100;
+export const ROLL_H = 220;
+export const ROLL_LEFT_PAD = 42;
+export const ROLL_RIGHT_PAD = 80;
+export const ROLL_RESIZE_HANDLE = 7;
+export const REST_LANE_H = 18;
