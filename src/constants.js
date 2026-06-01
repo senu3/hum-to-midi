@@ -11,3 +11,5 @@ export const ROLL_LEFT_PAD = 42;
 export const ROLL_RIGHT_PAD = 80;
 export const ROLL_RESIZE_HANDLE = 7;
 export const REST_LANE_H = 18;
+export const INPUT_PITCH_HISTORY_MS = 700;
+export const INPUT_PITCH_HISTORY_LIMIT = 24;

@@ -1,5 +1,7 @@
 import {
   DEFAULT_BPM,
+  INPUT_PITCH_HISTORY_LIMIT,
+  INPUT_PITCH_HISTORY_MS,
   IS_BLACK,
   KB_HI,
   KB_LO,
@@ -51,6 +53,7 @@ const state = {
   rawPitch: null,
   smoothedMidi: null,
   stablePitch: null,
+  pitchHistory: [],
   pendingNote: null,
   pendingFrames: 0,
   holdStart: null,
@@ -132,6 +135,10 @@ function midiToNoteName(midi) {
 
 function midiToCents(midi) {
   return Math.round((midi - Math.round(midi)) * 100);
+}
+
+function nearestMidi(midi) {
+  return clamp(Math.round(midi), 0, 127);
 }
 
 function clamp(value, min, max) {
@@ -767,6 +774,30 @@ function detectPitch(buffer, sampleRate) {
   return { freq, clarity: bestScore, rms };
 }
 
+function rememberInputPitch(midi, clarity) {
+  const now = performance.now();
+  state.pitchHistory.push({ midi, clarity, timeMs: now });
+  state.pitchHistory = state.pitchHistory
+    .filter(item => now - item.timeMs <= INPUT_PITCH_HISTORY_MS)
+    .slice(-INPUT_PITCH_HISTORY_LIMIT);
+}
+
+function recentAveragePitch() {
+  const now = performance.now();
+  const recent = state.pitchHistory.filter(item => now - item.timeMs <= INPUT_PITCH_HISTORY_MS);
+  if (!recent.length) return null;
+  let weighted = 0;
+  let weightSum = 0;
+  for (const item of recent) {
+    const age = now - item.timeMs;
+    const ageWeight = 1 - Math.min(age, INPUT_PITCH_HISTORY_MS) / INPUT_PITCH_HISTORY_MS;
+    const weight = Math.max(0.2, item.clarity || 0.5) * Math.max(0.25, ageWeight);
+    weighted += item.midi * weight;
+    weightSum += weight;
+  }
+  return weightSum > 0 ? nearestMidi(weighted / weightSum) : null;
+}
+
 function updatePitch(pitchResult) {
   if (!pitchResult) {
     state.rawPitch = null;
@@ -793,6 +824,7 @@ function updatePitch(pitchResult) {
 
   state.rawPitch = { freq: pitchResult.freq, midi: rawMidi, clarity: pitchResult.clarity };
   state.smoothedMidi = smooth;
+  rememberInputPitch(smooth, pitchResult.clarity);
 
   if (rounded === state.pendingNote) {
     state.pendingFrames += 1;
@@ -888,7 +920,12 @@ function stopAudio() {
 }
 
 function currentPitchForInput() {
-  return state.stablePitch ? state.stablePitch.pitch : null;
+  if (state.stablePitch) return state.stablePitch.pitch;
+  const averaged = recentAveragePitch();
+  if (averaged != null) return averaged;
+  if (state.smoothedMidi != null) return nearestMidi(state.smoothedMidi);
+  if (state.rawPitch) return nearestMidi(state.rawPitch.midi);
+  return null;
 }
 
 function updateInputEnabled() {
@@ -1287,6 +1324,8 @@ window.__humToMidiTest = {
   tickToX,
   xToTick,
   recomputeCurrentTick,
+  currentPitchForInput,
+  recentAveragePitch,
   appendVlq,
   durationTicks,
   gridTicks,
