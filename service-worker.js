@@ -1,4 +1,4 @@
-const CACHE_NAME = "humtap-midi-v3";
+const CACHE_NAME = "humtap-midi-v4";
 const ASSETS = [
   "./",
   "./index.html",

@@ -56,6 +56,7 @@ const state = {
   rawPitch: null,
   smoothedMidi: null,
   stablePitch: null,
+  lastStablePitch: null,
   pitchHistory: [],
   pendingNote: null,
   pendingFrames: 0,
@@ -847,6 +848,17 @@ function recentAveragePitch() {
   return weightSum > 0 ? nearestMidi(weighted / weightSum) : null;
 }
 
+function rememberStablePitch() {
+  if (!state.stablePitch) return;
+  state.lastStablePitch = {
+    pitch: state.stablePitch.pitch,
+    freq: state.stablePitch.freq,
+    cents: state.stablePitch.cents,
+    clarity: state.stablePitch.clarity,
+    timeMs: performance.now()
+  };
+}
+
 function updatePitch(pitchResult) {
   if (!pitchResult) {
     state.rawPitch = null;
@@ -889,6 +901,7 @@ function updatePitch(pitchResult) {
       cents,
       clarity: pitchResult.clarity
     };
+    rememberStablePitch();
   } else if (state.stablePitch && Math.abs(state.stablePitch.pitch - rounded) <= 1 && pitchResult.clarity >= 0.68) {
     state.stablePitch = {
       pitch: state.stablePitch.pitch,
@@ -896,6 +909,7 @@ function updatePitch(pitchResult) {
       cents,
       clarity: pitchResult.clarity
     };
+    rememberStablePitch();
   } else {
     state.stablePitch = null;
   }
@@ -961,6 +975,7 @@ function stopAudio() {
   state.stream = null;
   state.running = false;
   state.holdStart = null;
+  state.lastStablePitch = null;
   state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
   updatePitch(null);
@@ -977,6 +992,7 @@ function currentPitchForInput() {
   if (averaged != null) return averaged;
   if (state.smoothedMidi != null) return nearestMidi(state.smoothedMidi);
   if (state.rawPitch) return nearestMidi(state.rawPitch.midi);
+  if (state.lastStablePitch) return state.lastStablePitch.pitch;
   return null;
 }
 
@@ -1250,6 +1266,7 @@ function clearAll() {
   state.currentTick = 0;
   state.selectedNoteId = null;
   state.holdStart = null;
+  state.lastStablePitch = null;
   state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
   els.statusText.textContent = "記録をクリアしました";
