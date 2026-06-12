@@ -38,6 +38,7 @@ const state = {
   rests: [],
   history: [],
   view: {
+    // Base scale at DEFAULT_BPM. The roll display stretches by BPM for a lightweight bar-adjust view.
     pxPerTick: 0.08,
     scrollX: 0
   },
@@ -280,6 +281,7 @@ function readBpm() {
   state.bpm = next;
   els.bpmInput.value = String(next);
   updateSummary();
+  drawRoll();
 }
 
 function setMode(mode) {
@@ -449,7 +451,7 @@ function rollBounds() {
 function rollContentWidth() {
   const { totalTicks } = rollBounds();
   const viewportW = Math.max(1, els.rollWrap.clientWidth || els.roll.clientWidth || 1);
-  return Math.max(viewportW, Math.ceil(ROLL_LEFT_PAD + totalTicks * state.view.pxPerTick + ROLL_RIGHT_PAD));
+  return Math.max(viewportW, Math.ceil(ROLL_LEFT_PAD + totalTicks * effectivePxPerTick() + ROLL_RIGHT_PAD));
 }
 
 function syncRollCanvasSize(dpr = window.devicePixelRatio || 1) {
@@ -467,11 +469,15 @@ function syncRollCanvasSize(dpr = window.devicePixelRatio || 1) {
 }
 
 function tickToX(tick) {
-  return ROLL_LEFT_PAD + tick * state.view.pxPerTick;
+  return ROLL_LEFT_PAD + tick * effectivePxPerTick();
 }
 
 function xToTick(x) {
-  return Math.max(0, (x - ROLL_LEFT_PAD) / state.view.pxPerTick);
+  return Math.max(0, (x - ROLL_LEFT_PAD) / effectivePxPerTick());
+}
+
+function effectivePxPerTick() {
+  return state.view.pxPerTick * DEFAULT_BPM / state.bpm;
 }
 
 function midiToRollY(midi) {
@@ -668,7 +674,7 @@ function handleRollMouseMove(event) {
   if (!note) return;
   const original = state.drag.originalNote;
   const grid = gridTicks();
-  const deltaTicks = Math.round((point.x - state.drag.startMouseX) / state.view.pxPerTick / grid) * grid;
+  const deltaTicks = Math.round((point.x - state.drag.startMouseX) / effectivePxPerTick() / grid) * grid;
   const semH = ROLL_H / (KB_HI - KB_LO);
   state.drag.didMove = state.drag.didMove || Math.abs(point.x - state.drag.startMouseX) > 2 || Math.abs(point.y - state.drag.startMouseY) > 2;
 
@@ -1256,6 +1262,7 @@ els.btnFillGap.addEventListener("click", fillSelectedGap);
 els.btnCompact.addEventListener("click", compactTimeline);
 els.btnClear.addEventListener("click", clearAll);
 els.btnMidi.addEventListener("click", downloadMidi);
+els.bpmInput.addEventListener("input", readBpm);
 els.bpmInput.addEventListener("change", readBpm);
 els.roll.addEventListener("click", handleRollClick);
 els.roll.addEventListener("dblclick", handleRollDoubleClick);
@@ -1323,6 +1330,7 @@ window.__humToMidiTest = {
   compactTimeline,
   tickToX,
   xToTick,
+  effectivePxPerTick,
   recomputeCurrentTick,
   currentPitchForInput,
   recentAveragePitch,
