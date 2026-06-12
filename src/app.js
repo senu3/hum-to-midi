@@ -27,7 +27,7 @@ const state = {
   stream: null,
   rafId: 0,
   running: false,
-  mode: "step",
+  mode: "hold",
   bpm: DEFAULT_BPM,
   durationDenom: 4,
   currentTick: 0,
@@ -60,6 +60,8 @@ const state = {
   pendingNote: null,
   pendingFrames: 0,
   holdStart: null,
+  lastHoldEndTimeMs: null,
+  activePointerId: null,
   lastBuffer: null
 };
 
@@ -72,6 +74,7 @@ const els = {
   modeStep: document.getElementById("mode-step"),
   modeHold: document.getElementById("mode-hold"),
   btnInput: document.getElementById("btn-input"),
+  btnRecordPad: document.getElementById("btn-record-pad"),
   btnRest: document.getElementById("btn-rest"),
   btnUndo: document.getElementById("btn-undo"),
   btnDelete: document.getElementById("btn-delete"),
@@ -310,12 +313,25 @@ function toggleFreeScale() {
   drawRoll();
 }
 
+function recordButtons() {
+  return [els.btnInput, els.btnRecordPad].filter(Boolean);
+}
+
+function setRecordButtonsText(text) {
+  for (const button of recordButtons()) button.textContent = text;
+}
+
+function setRecordButtonsPressed(pressed) {
+  for (const button of recordButtons()) button.classList.toggle("pressed", pressed);
+}
+
 function setMode(mode) {
   if (state.holdStart) finishHoldInput();
   state.mode = mode;
+  if (mode !== "hold") state.lastHoldEndTimeMs = null;
   els.modeStep.classList.toggle("active", mode === "step");
   els.modeHold.classList.toggle("active", mode === "hold");
-  els.btnInput.textContent = mode === "step" ? "⏺ 入力" : "⏺ 押して記録";
+  setRecordButtonsText(mode === "step" ? "REC" : "HOLD REC");
   updateInputEnabled();
   drawRoll();
 }
@@ -902,6 +918,7 @@ function audioLoop() {
   state.analyser.getFloatTimeDomainData(buffer);
   state.lastBuffer = buffer;
   updatePitch(detectPitch(buffer, state.audioCtx.sampleRate));
+  captureHoldPitchSample();
   drawScope(buffer);
   drawKeyboard();
   if (state.holdStart) drawRoll();
@@ -944,6 +961,8 @@ function stopAudio() {
   state.stream = null;
   state.running = false;
   state.holdStart = null;
+  state.lastHoldEndTimeMs = null;
+  state.activePointerId = null;
   updatePitch(null);
   els.btnStart.textContent = "▶ 開始";
   els.btnStart.classList.remove("active");
@@ -964,8 +983,10 @@ function currentPitchForInput() {
 function updateInputEnabled() {
   const ready = state.running && currentPitchForInput() != null;
   const hasSelection = selectedNote() != null;
-  els.btnInput.disabled = !ready;
-  els.btnInput.classList.toggle("ready", ready);
+  for (const button of recordButtons()) {
+    button.disabled = !ready;
+    button.classList.toggle("ready", ready);
+  }
   els.btnMidi.disabled = state.notes.length === 0;
   els.btnUndo.disabled = state.history.length === 0;
   els.btnDelete.disabled = state.notes.length === 0;
@@ -993,6 +1014,7 @@ function addStepNote() {
   state.notes.push(note);
   state.selectedNoteId = note.id;
   state.currentTick += note.durationTicks;
+  state.lastHoldEndTimeMs = null;
   pushHistory({ type: "add-note", noteId: note.id });
   els.statusText.textContent = "入力: " + midiToNoteName(pitch);
   renderAll();
@@ -1008,25 +1030,60 @@ function addRest() {
   const rest = createRest(state.currentTick, ticks);
   state.rests.push(rest);
   state.currentTick += ticks;
+  state.lastHoldEndTimeMs = null;
   pushHistory({ type: "add-rest", restId: rest.id });
   els.statusText.textContent = "休符: " + durationLabel();
   renderAll();
 }
 
+function captureHoldPitchSample() {
+  if (!state.holdStart) return;
+  const pitch = currentPitchForInput();
+  if (pitch == null) return;
+  const clarity = state.stablePitch?.clarity || state.rawPitch?.clarity || 0.5;
+  state.holdStart.samples.push({ pitch, clarity });
+}
+
+function resolveHoldPitch() {
+  if (!state.holdStart || !state.holdStart.samples.length) return state.holdStart?.pitch ?? null;
+  let weighted = 0;
+  let weightSum = 0;
+  for (const sample of state.holdStart.samples) {
+    const weight = Math.max(0.25, sample.clarity || 0.5);
+    weighted += sample.pitch * weight;
+    weightSum += weight;
+  }
+  return weightSum > 0 ? nearestMidi(weighted / weightSum) : state.holdStart.pitch;
+}
+
+function applyHoldGap(nowMs) {
+  if (state.mode !== "hold" || state.lastHoldEndTimeMs == null || !state.notes.length) return;
+  const elapsedSec = Math.max(0, (nowMs - state.lastHoldEndTimeMs) / 1000);
+  const rawTicks = secondsToTicks(elapsedSec);
+  const grid = gridTicks();
+  const gapTicks = Math.round(rawTicks / grid) * grid;
+  if (gapTicks < grid) return;
+  if (hasTimelineOverlap(state.currentTick, gapTicks)) return;
+  state.currentTick += gapTicks;
+}
+
 function startHoldInput() {
   if (state.mode !== "hold" || state.holdStart) return;
   readBpm();
+  const nowMs = performance.now();
   const pitch = currentPitchForInput();
   if (pitch == null) {
     els.statusText.textContent = "音程が安定していません";
     return;
   }
+  applyHoldGap(nowMs);
   state.holdStart = {
     pitch,
     startTick: state.currentTick,
-    timeMs: performance.now()
+    timeMs: nowMs,
+    samples: [{ pitch, clarity: state.stablePitch?.clarity || state.rawPitch?.clarity || 0.5 }]
   };
-  els.btnInput.classList.add("pressed");
+  setRecordButtonsPressed(true);
   els.statusText.textContent = "記録中: " + midiToNoteName(pitch);
   drawRoll();
 }
@@ -1034,11 +1091,14 @@ function startHoldInput() {
 function finishHoldInput() {
   if (!state.holdStart) return;
   readBpm();
-  const elapsedSec = (performance.now() - state.holdStart.timeMs) / 1000;
+  const nowMs = performance.now();
+  captureHoldPitchSample();
+  const elapsedSec = (nowMs - state.holdStart.timeMs) / 1000;
   const duration = quantizeTicks(secondsToTicks(elapsedSec));
-  const note = createNote(state.holdStart.pitch, state.holdStart.startTick, duration);
+  const pitch = resolveHoldPitch();
+  const note = createNote(pitch, state.holdStart.startTick, duration);
   if (hasTimelineOverlap(note.startTick, note.durationTicks)) {
-    els.btnInput.classList.remove("pressed");
+    setRecordButtonsPressed(false);
     state.holdStart = null;
     els.statusText.textContent = "重なる位置には入力できません";
     renderAll();
@@ -1048,8 +1108,9 @@ function finishHoldInput() {
   state.selectedNoteId = note.id;
   state.currentTick = note.startTick + note.durationTicks;
   pushHistory({ type: "add-note", noteId: note.id });
-  els.btnInput.classList.remove("pressed");
+  setRecordButtonsPressed(false);
   state.holdStart = null;
+  state.lastHoldEndTimeMs = nowMs;
   els.statusText.textContent = "確定: " + midiToNoteName(note.pitch) + " " + ticksToBeats(note.durationTicks);
   renderAll();
 }
@@ -1188,6 +1249,8 @@ function clearAll() {
   state.currentTick = 0;
   state.selectedNoteId = null;
   state.holdStart = null;
+  state.lastHoldEndTimeMs = null;
+  state.activePointerId = null;
   els.statusText.textContent = "記録をクリアしました";
   renderAll();
 }
@@ -1272,16 +1335,45 @@ function handleInputRelease() {
   if (state.mode === "hold") finishHoldInput();
 }
 
+function handleRecordPointerDown(event) {
+  if (event.button != null && event.button !== 0) return;
+  if (state.activePointerId != null) return;
+  event.preventDefault();
+  state.activePointerId = event.pointerId;
+  try {
+    event.currentTarget.setPointerCapture(event.pointerId);
+  } catch {
+    // Some browsers do not allow capture after a disabled-to-enabled transition.
+  }
+  handleInputPress();
+}
+
+function handleRecordPointerEnd(event) {
+  if (state.activePointerId != null && event.pointerId !== state.activePointerId) return;
+  state.activePointerId = null;
+  handleInputRelease();
+}
+
+function registerRecordPointerHandlers(button) {
+  if (!button) return;
+  button.addEventListener("pointerdown", handleRecordPointerDown);
+  button.addEventListener("pointerup", handleRecordPointerEnd);
+  button.addEventListener("pointercancel", handleRecordPointerEnd);
+  button.addEventListener("lostpointercapture", handleRecordPointerEnd);
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  });
+}
+
 els.btnStart.addEventListener("click", () => state.running ? stopAudio() : startAudio());
 els.modeStep.addEventListener("click", () => setMode("step"));
 els.modeHold.addEventListener("click", () => setMode("hold"));
-els.btnInput.addEventListener("mousedown", handleInputPress);
-els.btnInput.addEventListener("touchstart", event => {
-  event.preventDefault();
-  handleInputPress();
-}, { passive: false });
-document.addEventListener("mouseup", handleInputRelease);
-document.addEventListener("touchend", handleInputRelease);
+registerRecordPointerHandlers(els.btnInput);
+registerRecordPointerHandlers(els.btnRecordPad);
 els.btnRest.addEventListener("click", addRest);
 els.btnUndo.addEventListener("click", undo);
 els.btnDelete.addEventListener("click", deleteSelectedOrLastNote);
@@ -1333,6 +1425,7 @@ document.addEventListener("keydown", event => {
 document.addEventListener("keyup", event => {
   if (event.code !== "Space") return;
   event.preventDefault();
+  state.activePointerId = null;
   handleInputRelease();
 });
 
@@ -1342,8 +1435,10 @@ window.addEventListener("load", () => {
   readBpm();
   readBarScale();
   updateStretchControls();
+  setMode(state.mode);
   renderAll();
 });
+registerServiceWorker();
 
 window.__humToMidiTest = {
   freqToMidi,
@@ -1368,6 +1463,9 @@ window.__humToMidiTest = {
   recomputeCurrentTick,
   currentPitchForInput,
   recentAveragePitch,
+  captureHoldPitchSample,
+  resolveHoldPitch,
+  applyHoldGap,
   appendVlq,
   durationTicks,
   gridTicks,
