@@ -981,11 +981,12 @@ function currentPitchForInput() {
 }
 
 function updateInputEnabled() {
-  const ready = state.running && currentPitchForInput() != null;
+  const pitchReady = state.running && currentPitchForInput() != null;
+  const inputEnabled = state.running;
   const hasSelection = selectedNote() != null;
   for (const button of recordButtons()) {
-    button.disabled = !ready;
-    button.classList.toggle("ready", ready);
+    button.disabled = !inputEnabled;
+    button.classList.toggle("ready", pitchReady);
   }
   els.btnMidi.disabled = state.notes.length === 0;
   els.btnUndo.disabled = state.history.length === 0;
