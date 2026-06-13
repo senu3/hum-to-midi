@@ -24,6 +24,7 @@ import {
 const state = {
   audioCtx: null,
   analyser: null,
+  audioBuffer: null,
   stream: null,
   rafId: 0,
   running: false,
@@ -63,6 +64,8 @@ const state = {
   holdStart: null,
   recordOverlayActive: false,
   lastHoldEndTimeMs: null,
+  lastPitchProcessMs: 0,
+  lastVisualDrawMs: 0,
   activePointerId: null,
   lastBuffer: null
 };
@@ -111,6 +114,23 @@ const els = {
 let keyboardCtx = els.keyboard.getContext("2d");
 let scopeCtx = els.scope.getContext("2d");
 let rollCtx = els.roll.getContext("2d");
+
+function isCompactViewport() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function effectiveCanvasDpr() {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.min(dpr, isCompactViewport() ? 1.5 : 2);
+}
+
+function pitchProcessIntervalMs() {
+  return isCompactViewport() ? 34 : 17;
+}
+
+function visualDrawIntervalMs() {
+  return isCompactViewport() ? 50 : 34;
+}
 
 function durationTicks() {
   return Math.round(TPQN * 4 / state.durationDenom);
@@ -387,7 +407,7 @@ function setMode(mode) {
 }
 
 function resizeCanvases() {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = effectiveCanvasDpr();
   const topRect = document.getElementById("row-top").getBoundingClientRect();
   const keyboardW = 34;
   els.keyboard.width = Math.round(keyboardW * dpr);
@@ -546,7 +566,7 @@ function rollContentWidth() {
   return Math.max(viewportW, Math.ceil(ROLL_LEFT_PAD + totalTicks * effectivePxPerTick() + ROLL_RIGHT_PAD));
 }
 
-function syncRollCanvasSize(dpr = window.devicePixelRatio || 1) {
+function syncRollCanvasSize(dpr = effectiveCanvasDpr()) {
   const contentW = rollContentWidth();
   const pixelW = Math.max(1, Math.round(contentW * dpr));
   const pixelH = Math.round(ROLL_H * dpr);
@@ -979,14 +999,34 @@ function updatePitch(pitchResult) {
 
 function audioLoop() {
   if (!state.analyser) return;
-  const buffer = new Float32Array(state.analyser.fftSize);
-  state.analyser.getFloatTimeDomainData(buffer);
-  state.lastBuffer = buffer;
-  updatePitch(detectPitch(buffer, state.audioCtx.sampleRate));
-  captureHoldPitchSample();
-  drawScope(buffer);
-  drawKeyboard();
-  if (state.holdStart) drawRoll();
+  const now = performance.now();
+  let buffer = state.audioBuffer;
+  let hasFreshBuffer = false;
+
+  if (!buffer || buffer.length !== state.analyser.fftSize) {
+    buffer = new Float32Array(state.analyser.fftSize);
+    state.audioBuffer = buffer;
+  }
+
+  if (now - state.lastPitchProcessMs >= pitchProcessIntervalMs()) {
+    state.analyser.getFloatTimeDomainData(buffer);
+    hasFreshBuffer = true;
+    state.lastBuffer = buffer;
+    state.lastPitchProcessMs = now;
+    updatePitch(detectPitch(buffer, state.audioCtx.sampleRate));
+    captureHoldPitchSample();
+  }
+
+  if (now - state.lastVisualDrawMs >= visualDrawIntervalMs()) {
+    if (!hasFreshBuffer) {
+      state.analyser.getFloatTimeDomainData(buffer);
+      state.lastBuffer = buffer;
+    }
+    state.lastVisualDrawMs = now;
+    drawScope(buffer);
+    drawKeyboard();
+    if (state.holdStart) drawRoll();
+  }
   state.rafId = requestAnimationFrame(audioLoop);
 }
 
@@ -1003,10 +1043,13 @@ async function startAudio() {
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const source = state.audioCtx.createMediaStreamSource(state.stream);
     state.analyser = state.audioCtx.createAnalyser();
-    state.analyser.fftSize = 4096;
+    state.analyser.fftSize = isCompactViewport() ? 2048 : 4096;
     state.analyser.smoothingTimeConstant = 0;
+    state.audioBuffer = new Float32Array(state.analyser.fftSize);
     source.connect(state.analyser);
     state.running = true;
+    state.lastPitchProcessMs = 0;
+    state.lastVisualDrawMs = 0;
     els.btnStart.textContent = "■ 停止";
     els.btnStart.classList.add("active");
     els.statusText.textContent = "音声検出中";
@@ -1023,6 +1066,7 @@ function stopAudio() {
   if (state.audioCtx) state.audioCtx.close();
   state.audioCtx = null;
   state.analyser = null;
+  state.audioBuffer = null;
   state.stream = null;
   state.running = false;
   state.holdStart = null;
@@ -1556,6 +1600,10 @@ window.__humToMidiTest = {
   toggleFreeScale,
   recomputeCurrentTick,
   currentPitchForInput,
+  isCompactViewport,
+  effectiveCanvasDpr,
+  pitchProcessIntervalMs,
+  visualDrawIntervalMs,
   recentAveragePitch,
   captureHoldPitchSample,
   resolveHoldPitch,
