@@ -197,7 +197,7 @@
     cursor: default;
   }
 
-  #mobile-pad {
+  #record-launch {
     display: block;
   }
 
@@ -380,31 +380,100 @@
     color: var(--accent-3);
   }
 
-  .record-pad {
+  .record-mode-btn {
     width: 100%;
-    min-height: 126px;
-    border-color: var(--danger);
-    border-width: 2px;
-    border-radius: 8px;
-    background: linear-gradient(180deg, rgba(255,51,85,0.13), rgba(255,51,85,0.04));
-    color: #ffb4c0;
+    min-height: 48px;
+    border-color: var(--accent);
+    background: rgba(0,229,160,0.08);
+    color: var(--accent);
     font-family: "Barlow Condensed", Arial, sans-serif;
-    font-size: 34px;
+    font-size: 18px;
     font-weight: 800;
     letter-spacing: 0.08em;
+  }
+
+  .record-mode-btn:disabled {
+    border-color: var(--border);
+    color: var(--muted);
+    background: transparent;
+  }
+
+  #record-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    background: rgba(2,2,4,0.82);
+    color: var(--text);
     touch-action: none;
   }
 
-  .record-pad.ready {
-    border-color: var(--accent);
-    background: linear-gradient(180deg, rgba(0,229,160,0.17), rgba(0,229,160,0.05));
+  #record-overlay.hidden {
+    display: none;
+  }
+
+  #record-touch-surface {
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    padding: calc(28px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 18px max(18px, env(safe-area-inset-left));
+    text-align: center;
+    touch-action: none;
+  }
+
+  .overlay-readout {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+
+  #overlay-note {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 92px;
+    font-weight: 800;
+    line-height: 0.9;
     color: var(--accent);
   }
 
-  .record-pad.pressed {
+  #overlay-state {
+    min-height: 24px;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+  }
+
+  #overlay-count {
+    color: var(--dim);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+
+  #record-overlay.recording {
+    background: rgba(30,0,8,0.88);
+  }
+
+  #record-overlay.recording #overlay-note {
+    color: #ffb4c0;
+  }
+
+  #record-overlay-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 12px max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    border-top: 1px solid rgba(255,255,255,0.12);
+    background: rgba(10,10,12,0.94);
+  }
+
+  #btn-overlay-stop {
     border-color: var(--danger);
-    background: var(--danger);
-    color: #210008;
+    color: #ffb4c0;
+  }
+
+  #btn-overlay-undo {
+    border-color: var(--accent-3);
+    color: #cbc5ff;
   }
 
   #notes-list {
@@ -556,6 +625,14 @@
       margin-top: 2px;
     }
 
+    #record-launch {
+      order: 3;
+    }
+
+    #overlay-note {
+      font-size: 76px;
+    }
+
     #statusbar {
       font-size: 9px;
       line-height: 1.35;
@@ -600,8 +677,8 @@
     </div>
   </div>
 
-  <div id="mobile-pad">
-    <button class="record-pad" id="btn-record-pad" disabled>HOLD REC</button>
+  <div id="record-launch">
+    <button class="btn record-mode-btn" id="btn-record-mode" disabled>録音モード</button>
   </div>
 
   <div id="controls">
@@ -662,6 +739,20 @@
   <div id="notes-list"></div>
   <div id="statusbar">STATUS: <span id="status-text">マイクを開始してください</span></div>
 </main>
+
+<div id="record-overlay" class="hidden" aria-hidden="true">
+  <div id="record-touch-surface">
+    <div class="overlay-readout" aria-live="polite">
+      <div id="overlay-note">—</div>
+      <div id="overlay-state">READY</div>
+      <div id="overlay-count">NOTES 0</div>
+    </div>
+  </div>
+  <div id="record-overlay-controls">
+    <button class="btn secondary" id="btn-overlay-undo" type="button">UNDO</button>
+    <button class="btn" id="btn-overlay-stop" type="button">停止</button>
+  </div>
+</div>
 
 <script type="module" src="./src/app.js"></script>
 </body>

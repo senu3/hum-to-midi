@@ -61,6 +61,7 @@ const state = {
   pendingNote: null,
   pendingFrames: 0,
   holdStart: null,
+  recordOverlayActive: false,
   lastHoldEndTimeMs: null,
   activePointerId: null,
   lastBuffer: null
@@ -75,7 +76,14 @@ const els = {
   modeStep: document.getElementById("mode-step"),
   modeHold: document.getElementById("mode-hold"),
   btnInput: document.getElementById("btn-input"),
-  btnRecordPad: document.getElementById("btn-record-pad"),
+  btnRecordMode: document.getElementById("btn-record-mode"),
+  recordOverlay: document.getElementById("record-overlay"),
+  recordTouchSurface: document.getElementById("record-touch-surface"),
+  overlayNote: document.getElementById("overlay-note"),
+  overlayState: document.getElementById("overlay-state"),
+  overlayCount: document.getElementById("overlay-count"),
+  btnOverlayStop: document.getElementById("btn-overlay-stop"),
+  btnOverlayUndo: document.getElementById("btn-overlay-undo"),
   btnRest: document.getElementById("btn-rest"),
   btnUndo: document.getElementById("btn-undo"),
   btnDelete: document.getElementById("btn-delete"),
@@ -315,7 +323,7 @@ function toggleFreeScale() {
 }
 
 function recordButtons() {
-  return [els.btnInput, els.btnRecordPad].filter(Boolean);
+  return [els.btnInput, els.btnRecordMode].filter(Boolean);
 }
 
 function setRecordButtonsText(text) {
@@ -326,15 +334,56 @@ function setRecordButtonsPressed(pressed) {
   for (const button of recordButtons()) button.classList.toggle("pressed", pressed);
 }
 
+function updateOverlayReadout() {
+  if (!els.recordOverlay) return;
+  const pitchInfo = currentPitchForInputInfo();
+  els.overlayNote.textContent = pitchInfo ? midiToNoteName(pitchInfo.pitch) : "—";
+  els.overlayCount.textContent = "NOTES " + state.notes.length;
+  els.recordOverlay.classList.toggle("recording", Boolean(state.holdStart));
+  if (state.holdStart) {
+    els.overlayState.textContent = "HOLDING";
+  } else if (!state.running) {
+    els.overlayState.textContent = "MIC OFF";
+  } else if (!pitchInfo) {
+    els.overlayState.textContent = "NO PITCH";
+  } else if (pitchInfo.source === "lastStable") {
+    els.overlayState.textContent = "USING LAST PITCH";
+  } else {
+    els.overlayState.textContent = "READY";
+  }
+  els.btnOverlayUndo.disabled = state.history.length === 0;
+}
+
+function setRecordOverlayActive(active) {
+  if (!els.recordOverlay) return;
+  if (active && !state.running) {
+    els.statusText.textContent = "マイクを開始してください";
+    return;
+  }
+  if (!active && state.holdStart) finishHoldInput();
+  state.recordOverlayActive = active;
+  state.activePointerId = null;
+  els.recordOverlay.classList.toggle("hidden", !active);
+  els.recordOverlay.setAttribute("aria-hidden", active ? "false" : "true");
+  if (active) {
+    setMode("hold");
+    els.statusText.textContent = "録音モード: 画面をタップ/ホールド";
+  } else {
+    els.statusText.textContent = "録音モードを終了しました";
+  }
+  updateOverlayReadout();
+}
+
 function setMode(mode) {
   if (state.holdStart) finishHoldInput();
   state.mode = mode;
   if (mode !== "hold") state.lastHoldEndTimeMs = null;
   els.modeStep.classList.toggle("active", mode === "step");
   els.modeHold.classList.toggle("active", mode === "hold");
-  setRecordButtonsText(mode === "step" ? "REC" : "HOLD REC");
+  setRecordButtonsText(mode === "step" ? "REC" : "録音モード");
   updateInputEnabled();
   drawRoll();
+  updateOverlayReadout();
 }
 
 function resizeCanvases() {
@@ -874,6 +923,7 @@ function updatePitch(pitchResult) {
     els.centsFill.style.left = "50%";
     els.centsFill.style.background = "var(--dim)";
     updateInputEnabled();
+    updateOverlayReadout();
     return;
   }
 
@@ -924,6 +974,7 @@ function updatePitch(pitchResult) {
   els.centsFill.style.left = clamp(50 + displayCents * 0.5, 0, 100) + "%";
   els.centsFill.style.background = Math.abs(displayCents) < 10 ? "var(--accent)" : "var(--accent-2)";
   updateInputEnabled();
+  updateOverlayReadout();
 }
 
 function audioLoop() {
@@ -975,24 +1026,33 @@ function stopAudio() {
   state.stream = null;
   state.running = false;
   state.holdStart = null;
+  state.recordOverlayActive = false;
   state.lastStablePitch = null;
   state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
   updatePitch(null);
   els.btnStart.textContent = "▶ 開始";
   els.btnStart.classList.remove("active");
+  els.recordOverlay.classList.add("hidden");
+  els.recordOverlay.setAttribute("aria-hidden", "true");
   els.statusText.textContent = "停止しました";
   drawKeyboard();
   drawRoll();
 }
 
-function currentPitchForInput() {
-  if (state.stablePitch) return state.stablePitch.pitch;
+function currentPitchForInputInfo() {
+  if (state.stablePitch) return { pitch: state.stablePitch.pitch, source: "stable", clarity: state.stablePitch.clarity };
   const averaged = recentAveragePitch();
-  if (averaged != null) return averaged;
-  if (state.smoothedMidi != null) return nearestMidi(state.smoothedMidi);
-  if (state.rawPitch) return nearestMidi(state.rawPitch.midi);
-  if (state.lastStablePitch) return state.lastStablePitch.pitch;
+  if (averaged != null) return { pitch: averaged, source: "average", clarity: 0.6 };
+  if (state.smoothedMidi != null) return { pitch: nearestMidi(state.smoothedMidi), source: "smooth", clarity: state.rawPitch?.clarity || 0.5 };
+  if (state.rawPitch) return { pitch: nearestMidi(state.rawPitch.midi), source: "raw", clarity: state.rawPitch.clarity };
+  if (state.lastStablePitch) return { pitch: state.lastStablePitch.pitch, source: "lastStable", clarity: state.lastStablePitch.clarity };
+  return null;
+}
+
+function currentPitchForInput() {
+  const pitchInfo = currentPitchForInputInfo();
+  if (pitchInfo) return pitchInfo.pitch;
   return null;
 }
 
@@ -1004,6 +1064,7 @@ function updateInputEnabled() {
     button.disabled = !inputEnabled;
     button.classList.toggle("ready", pitchReady);
   }
+  if (els.btnOverlayUndo) els.btnOverlayUndo.disabled = state.history.length === 0;
   els.btnMidi.disabled = state.notes.length === 0;
   els.btnUndo.disabled = state.history.length === 0;
   els.btnDelete.disabled = state.notes.length === 0;
@@ -1055,10 +1116,9 @@ function addRest() {
 
 function captureHoldPitchSample() {
   if (!state.holdStart) return;
-  const pitch = currentPitchForInput();
-  if (pitch == null) return;
-  const clarity = state.stablePitch?.clarity || state.rawPitch?.clarity || 0.5;
-  state.holdStart.samples.push({ pitch, clarity });
+  const pitchInfo = currentPitchForInputInfo();
+  if (!pitchInfo) return;
+  state.holdStart.samples.push({ pitch: pitchInfo.pitch, clarity: pitchInfo.clarity });
 }
 
 function resolveHoldPitch() {
@@ -1088,20 +1148,23 @@ function startHoldInput() {
   if (state.mode !== "hold" || state.holdStart) return;
   readBpm();
   const nowMs = performance.now();
-  const pitch = currentPitchForInput();
-  if (pitch == null) {
+  const pitchInfo = currentPitchForInputInfo();
+  if (!pitchInfo) {
     els.statusText.textContent = "音程が安定していません";
+    updateOverlayReadout();
     return;
   }
+  const pitch = pitchInfo.pitch;
   applyHoldGap(nowMs);
   state.holdStart = {
     pitch,
     startTick: state.currentTick,
     timeMs: nowMs,
-    samples: [{ pitch, clarity: state.stablePitch?.clarity || state.rawPitch?.clarity || 0.5 }]
+    samples: [{ pitch, clarity: pitchInfo.clarity }]
   };
   setRecordButtonsPressed(true);
   els.statusText.textContent = "記録中: " + midiToNoteName(pitch);
+  updateOverlayReadout();
   drawRoll();
 }
 
@@ -1129,6 +1192,7 @@ function finishHoldInput() {
   state.holdStart = null;
   state.lastHoldEndTimeMs = nowMs;
   els.statusText.textContent = "確定: " + midiToNoteName(note.pitch) + " " + ticksToBeats(note.durationTicks);
+  updateOverlayReadout();
   renderAll();
 }
 
@@ -1266,9 +1330,12 @@ function clearAll() {
   state.currentTick = 0;
   state.selectedNoteId = null;
   state.holdStart = null;
+  state.recordOverlayActive = false;
   state.lastStablePitch = null;
   state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
+  els.recordOverlay.classList.add("hidden");
+  els.recordOverlay.setAttribute("aria-hidden", "true");
   els.statusText.textContent = "記録をクリアしました";
   renderAll();
 }
@@ -1317,6 +1384,7 @@ function renderAll() {
   updateSummary();
   updateNotesList();
   updateInputEnabled();
+  updateOverlayReadout();
   drawRoll();
 }
 
@@ -1346,14 +1414,15 @@ function downloadMidi() {
 
 function handleInputPress() {
   if (state.mode === "step") addStepNote();
-  else startHoldInput();
+  else setRecordOverlayActive(true);
 }
 
 function handleInputRelease() {
   if (state.mode === "hold") finishHoldInput();
 }
 
-function handleRecordPointerDown(event) {
+function handleOverlayPointerDown(event) {
+  if (!state.recordOverlayActive) return;
   if (event.button != null && event.button !== 0) return;
   if (state.activePointerId != null) return;
   event.preventDefault();
@@ -1363,21 +1432,14 @@ function handleRecordPointerDown(event) {
   } catch {
     // Some browsers do not allow capture after a disabled-to-enabled transition.
   }
-  handleInputPress();
+  startHoldInput();
 }
 
-function handleRecordPointerEnd(event) {
+function handleOverlayPointerEnd(event) {
+  if (!state.recordOverlayActive) return;
   if (state.activePointerId != null && event.pointerId !== state.activePointerId) return;
   state.activePointerId = null;
   handleInputRelease();
-}
-
-function registerRecordPointerHandlers(button) {
-  if (!button) return;
-  button.addEventListener("pointerdown", handleRecordPointerDown);
-  button.addEventListener("pointerup", handleRecordPointerEnd);
-  button.addEventListener("pointercancel", handleRecordPointerEnd);
-  button.addEventListener("lostpointercapture", handleRecordPointerEnd);
 }
 
 function registerServiceWorker() {
@@ -1390,8 +1452,22 @@ function registerServiceWorker() {
 els.btnStart.addEventListener("click", () => state.running ? stopAudio() : startAudio());
 els.modeStep.addEventListener("click", () => setMode("step"));
 els.modeHold.addEventListener("click", () => setMode("hold"));
-registerRecordPointerHandlers(els.btnInput);
-registerRecordPointerHandlers(els.btnRecordPad);
+els.btnInput.addEventListener("click", handleInputPress);
+els.btnRecordMode.addEventListener("click", () => setRecordOverlayActive(true));
+els.recordTouchSurface.addEventListener("pointerdown", handleOverlayPointerDown);
+els.recordTouchSurface.addEventListener("pointerup", handleOverlayPointerEnd);
+els.recordTouchSurface.addEventListener("pointercancel", handleOverlayPointerEnd);
+els.recordTouchSurface.addEventListener("lostpointercapture", handleOverlayPointerEnd);
+els.btnOverlayStop.addEventListener("pointerdown", event => event.stopPropagation());
+els.btnOverlayStop.addEventListener("click", event => {
+  event.stopPropagation();
+  setRecordOverlayActive(false);
+});
+els.btnOverlayUndo.addEventListener("pointerdown", event => event.stopPropagation());
+els.btnOverlayUndo.addEventListener("click", event => {
+  event.stopPropagation();
+  undo();
+});
 els.btnRest.addEventListener("click", addRest);
 els.btnUndo.addEventListener("click", undo);
 els.btnDelete.addEventListener("click", deleteSelectedOrLastNote);
