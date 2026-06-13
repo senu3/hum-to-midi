@@ -67,7 +67,14 @@ const state = {
   lastPitchProcessMs: 0,
   lastVisualDrawMs: 0,
   activePointerId: null,
-  lastBuffer: null
+  lastBuffer: null,
+  lastInputUi: {
+    pitchReady: null,
+    inputEnabled: null,
+    hasSelection: null,
+    historyLength: null,
+    noteLength: null
+  }
 };
 
 const els = {
@@ -130,6 +137,10 @@ function pitchProcessIntervalMs() {
 
 function visualDrawIntervalMs() {
   return isCompactViewport() ? 50 : 34;
+}
+
+function holdPitchSampleLimit() {
+  return isCompactViewport() ? 48 : 96;
 }
 
 function durationTicks() {
@@ -356,6 +367,7 @@ function setRecordButtonsPressed(pressed) {
 
 function updateOverlayReadout() {
   if (!els.recordOverlay) return;
+  if (!state.recordOverlayActive && els.recordOverlay.classList.contains("hidden")) return;
   const pitchInfo = currentPitchForInputInfo();
   els.overlayNote.textContent = pitchInfo ? midiToNoteName(pitchInfo.pitch) : "—";
   els.overlayCount.textContent = "NOTES " + state.notes.length;
@@ -1104,16 +1116,34 @@ function updateInputEnabled() {
   const pitchReady = state.running && currentPitchForInput() != null;
   const inputEnabled = state.running;
   const hasSelection = selectedNote() != null;
-  for (const button of recordButtons()) {
-    button.disabled = !inputEnabled;
-    button.classList.toggle("ready", pitchReady);
+  const ui = state.lastInputUi;
+
+  if (ui.pitchReady !== pitchReady || ui.inputEnabled !== inputEnabled) {
+    for (const button of recordButtons()) {
+      button.disabled = !inputEnabled;
+      button.classList.toggle("ready", pitchReady);
+    }
+    ui.pitchReady = pitchReady;
+    ui.inputEnabled = inputEnabled;
   }
-  if (els.btnOverlayUndo) els.btnOverlayUndo.disabled = state.history.length === 0;
-  els.btnMidi.disabled = state.notes.length === 0;
-  els.btnUndo.disabled = state.history.length === 0;
-  els.btnDelete.disabled = state.notes.length === 0;
-  els.btnFillGap.disabled = !hasSelection;
-  els.btnCompact.disabled = state.notes.length === 0;
+
+  if (ui.historyLength !== state.history.length) {
+    if (els.btnOverlayUndo) els.btnOverlayUndo.disabled = state.history.length === 0;
+    els.btnUndo.disabled = state.history.length === 0;
+    ui.historyLength = state.history.length;
+  }
+
+  if (ui.noteLength !== state.notes.length) {
+    els.btnMidi.disabled = state.notes.length === 0;
+    els.btnDelete.disabled = state.notes.length === 0;
+    els.btnCompact.disabled = state.notes.length === 0;
+    ui.noteLength = state.notes.length;
+  }
+
+  if (ui.hasSelection !== hasSelection) {
+    els.btnFillGap.disabled = !hasSelection;
+    ui.hasSelection = hasSelection;
+  }
 }
 
 function pushHistory(entry) {
@@ -1163,6 +1193,10 @@ function captureHoldPitchSample() {
   const pitchInfo = currentPitchForInputInfo();
   if (!pitchInfo) return;
   state.holdStart.samples.push({ pitch: pitchInfo.pitch, clarity: pitchInfo.clarity });
+  const limit = holdPitchSampleLimit();
+  if (state.holdStart.samples.length > limit) {
+    state.holdStart.samples.splice(0, state.holdStart.samples.length - limit);
+  }
 }
 
 function resolveHoldPitch() {
@@ -1604,6 +1638,7 @@ window.__humToMidiTest = {
   effectiveCanvasDpr,
   pitchProcessIntervalMs,
   visualDrawIntervalMs,
+  holdPitchSampleLimit,
   recentAveragePitch,
   captureHoldPitchSample,
   resolveHoldPitch,
