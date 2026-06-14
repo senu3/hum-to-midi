@@ -39,10 +39,9 @@ const state = {
   rests: [],
   history: [],
   view: {
-    // Base scale at DEFAULT_BPM. "bpm" stretches the roll by tempo; "free" uses freeScale only for display.
+    // Normal mode changes tempo only. "free" scales ticks with BPM.
     pxPerTick: 0.08,
     stretchMode: "bpm",
-    freeScale: 1,
     scrollX: 0
   },
   drag: {
@@ -103,8 +102,6 @@ const els = {
   btnMidi: document.getElementById("btn-midi"),
   bpmInput: document.getElementById("bpm-input"),
   btnFreeScale: document.getElementById("btn-free-scale"),
-  barScale: document.getElementById("bar-scale"),
-  barScaleValue: document.getElementById("bar-scale-value"),
   durationGrid: document.getElementById("duration-grid"),
   noteName: document.getElementById("note-name"),
   noteFreq: document.getElementById("note-freq"),
@@ -392,7 +389,7 @@ function restoreRest(snapshot) {
 function readBpm() {
   const next = clamp(Number.parseInt(els.bpmInput.value, 10) || DEFAULT_BPM, 30, 240);
   const previous = state.bpm;
-  if (state.view.stretchMode !== "free" && next !== previous) {
+  if (state.view.stretchMode === "free" && next !== previous) {
     scaleTimelineTicks(next / previous);
   }
   state.bpm = next;
@@ -403,20 +400,10 @@ function readBpm() {
   updateDebugState();
 }
 
-function readBarScale() {
-  const next = clamp(Number.parseInt(els.barScale.value, 10) || 100, 50, 200);
-  state.view.freeScale = next / 100;
-  els.barScale.value = String(next);
-  els.barScaleValue.textContent = next + "%";
-  drawRoll();
-  updateDebugState();
-}
-
 function updateStretchControls() {
   const free = state.view.stretchMode === "free";
   els.btnFreeScale.classList.toggle("active", free);
   els.btnFreeScale.textContent = free ? "FREE*" : "FREE";
-  els.barScale.disabled = !free;
 }
 
 function toggleFreeScale() {
@@ -674,8 +661,7 @@ function xToTick(x) {
 }
 
 function effectivePxPerTick() {
-  if (state.view.stretchMode === "free") return state.view.pxPerTick * state.view.freeScale;
-  return state.view.pxPerTick * DEFAULT_BPM / state.bpm;
+  return state.view.pxPerTick;
 }
 
 function midiToRollY(midi) {
@@ -1523,7 +1509,7 @@ function updateDebugState() {
   const payload = {
     bpm: state.bpm,
     stretchMode: state.view.stretchMode,
-    freeScale: state.view.freeScale,
+    pxPerTick: effectivePxPerTick(),
     currentTick: state.currentTick,
     position: els.positionReadout.textContent,
     length: els.lengthReadout.textContent,
@@ -1534,6 +1520,8 @@ function updateDebugState() {
       name: midiToNoteName(note.pitch),
       startTick: note.startTick,
       durationTicks: note.durationTicks,
+      x: tickToX(note.startTick),
+      width: tickToX(note.startTick + note.durationTicks) - tickToX(note.startTick),
       position: formatPosition(note.startTick),
       beats: ticksToBeats(note.durationTicks)
     })),
@@ -1544,8 +1532,7 @@ function updateDebugState() {
     })),
     controls: {
       bpmValue: els.bpmInput.value,
-      freeText: els.btnFreeScale.textContent,
-      barScaleDisabled: els.barScale.disabled
+      freeText: els.btnFreeScale.textContent
     }
   };
   document.documentElement.dataset.humToMidiDebug = JSON.stringify(payload);
@@ -1671,8 +1658,6 @@ els.btnMidi.addEventListener("click", downloadMidi);
 els.bpmInput.addEventListener("input", readBpm);
 els.bpmInput.addEventListener("change", readBpm);
 els.btnFreeScale.addEventListener("click", toggleFreeScale);
-els.barScale.addEventListener("input", readBarScale);
-els.barScale.addEventListener("change", readBarScale);
 els.roll.addEventListener("click", handleRollClick);
 els.roll.addEventListener("dblclick", handleRollDoubleClick);
 els.roll.addEventListener("mousedown", handleRollMouseDown);
@@ -1721,7 +1706,6 @@ window.addEventListener("resize", resizeCanvases);
 onWindowReady(() => {
   resizeCanvases();
   readBpm();
-  readBarScale();
   updateStretchControls();
   setMode(state.mode);
   renderAll();
@@ -1750,7 +1734,6 @@ window.__humToMidiTest = {
   updateDebugState,
   shouldSkipServiceWorker,
   shouldExposeDebugState,
-  readBarScale,
   toggleFreeScale,
   recomputeCurrentTick,
   currentPitchForInput,

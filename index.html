@@ -330,32 +330,15 @@
   }
 
   .stretch-row {
-    display: grid;
-    grid-template-columns: 64px 1fr 54px;
-    gap: 8px;
+    display: flex;
     margin-top: 8px;
     align-items: center;
-  }
-
-  #bar-scale {
-    width: 100%;
-    accent-color: var(--accent-3);
-  }
-
-  #bar-scale-value {
-    color: var(--muted);
-    font-size: 10px;
-    text-align: right;
   }
 
   #btn-free-scale.active {
     border-color: var(--accent-3);
     color: var(--accent-3);
     background: rgba(124,106,255,0.12);
-  }
-
-  #bar-scale:disabled {
-    opacity: 0.35;
   }
 
   .primary {
@@ -714,8 +697,6 @@
       </div>
       <div class="stretch-row">
         <button class="btn secondary" id="btn-free-scale" type="button">FREE</button>
-        <input id="bar-scale" type="range" min="50" max="200" step="1" value="100">
-        <span id="bar-scale-value">100%</span>
       </div>
     </div>
 
