@@ -62,7 +62,6 @@ const state = {
   pendingFrames: 0,
   holdStart: null,
   recordOverlayActive: false,
-  lastHoldEndTimeMs: null,
   lastPitchProcessMs: 0,
   lastVisualDrawMs: 0,
   activePointerId: null,
@@ -91,6 +90,8 @@ const els = {
   overlayNote: document.getElementById("overlay-note"),
   overlayState: document.getElementById("overlay-state"),
   overlayCount: document.getElementById("overlay-count"),
+  overlayNotePad: document.getElementById("overlay-note-pad"),
+  overlayRestPad: document.getElementById("overlay-rest-pad"),
   btnOverlayStop: document.getElementById("btn-overlay-stop"),
   btnOverlayUndo: document.getElementById("btn-overlay-undo"),
   btnRest: document.getElementById("btn-rest"),
@@ -158,10 +159,6 @@ function pitchProcessIntervalMs() {
 
 function visualDrawIntervalMs() {
   return isCompactViewport() ? 50 : 34;
-}
-
-function holdPitchSampleLimit() {
-  return isCompactViewport() ? 48 : 96;
 }
 
 function durationTicks() {
@@ -417,10 +414,6 @@ function recordButtons() {
   return [els.btnInput, els.btnRecordMode].filter(Boolean);
 }
 
-function setRecordButtonsText(text) {
-  for (const button of recordButtons()) button.textContent = text;
-}
-
 function setRecordButtonsPressed(pressed) {
   for (const button of recordButtons()) button.classList.toggle("pressed", pressed);
 }
@@ -429,11 +422,14 @@ function updateOverlayReadout() {
   if (!els.recordOverlay) return;
   if (!state.recordOverlayActive && els.recordOverlay.classList.contains("hidden")) return;
   const pitchInfo = currentPitchForInputInfo();
-  els.overlayNote.textContent = pitchInfo ? midiToNoteName(pitchInfo.pitch) : "—";
-  els.overlayCount.textContent = "NOTES " + state.notes.length;
+  const holdingRest = state.holdStart?.type === "rest";
+  const activeNoteName = state.holdStart?.type === "note" ? midiToNoteName(state.holdStart.pitch) : pitchInfo ? midiToNoteName(pitchInfo.pitch) : "—";
+  els.overlayNote.textContent = holdingRest ? "REST" : activeNoteName;
+  els.overlayCount.textContent = "NOTES " + state.notes.length + " / RESTS " + state.rests.length;
   els.recordOverlay.classList.toggle("recording", Boolean(state.holdStart));
+  els.recordOverlay.classList.toggle("resting", holdingRest);
   if (state.holdStart) {
-    els.overlayState.textContent = "HOLDING";
+    els.overlayState.textContent = holdingRest ? "REST LENGTH" : "NOTE LENGTH";
   } else if (!state.running) {
     els.overlayState.textContent = "MIC OFF";
   } else if (!pitchInfo) {
@@ -459,9 +455,9 @@ function setRecordOverlayActive(active) {
   els.recordOverlay.setAttribute("aria-hidden", active ? "false" : "true");
   if (active) {
     setMode("hold");
-    els.statusText.textContent = "録音モード: 画面をタップ/ホールド";
+    els.statusText.textContent = "ホールド入力: NOTE または REST を押してください";
   } else {
-    els.statusText.textContent = "録音モードを終了しました";
+    els.statusText.textContent = "ホールド入力を終了しました";
   }
   updateOverlayReadout();
 }
@@ -469,10 +465,10 @@ function setRecordOverlayActive(active) {
 function setMode(mode) {
   if (state.holdStart) finishHoldInput();
   state.mode = mode;
-  if (mode !== "hold") state.lastHoldEndTimeMs = null;
   els.modeStep.classList.toggle("active", mode === "step");
   els.modeHold.classList.toggle("active", mode === "hold");
-  setRecordButtonsText(mode === "step" ? "REC" : "録音モード");
+  els.btnInput.textContent = mode === "step" ? "TAP" : "HOLD";
+  els.btnRecordMode.textContent = "ホールド入力";
   updateInputEnabled();
   drawRoll();
   updateOverlayReadout();
@@ -518,7 +514,7 @@ function drawKeyboard() {
     if (IS_BLACK[midi % 12]) continue;
     const y = midiToKeyboardY(midi + 1);
     const active = state.stablePitch && state.stablePitch.pitch === midi;
-    const holding = state.holdStart && state.holdStart.pitch === midi;
+    const holding = state.holdStart?.type === "note" && state.holdStart.pitch === midi;
     keyboardCtx.fillStyle = holding ? "rgba(255,51,85,0.86)" : active ? "#00e5a0" : "#d8d8e8";
     keyboardCtx.fillRect(0, y, w - 1, semH);
     keyboardCtx.strokeStyle = "#45455a";
@@ -539,7 +535,7 @@ function drawKeyboard() {
     if (!IS_BLACK[midi % 12]) continue;
     const y = midiToKeyboardY(midi + 0.82);
     const active = state.stablePitch && state.stablePitch.pitch === midi;
-    const holding = state.holdStart && state.holdStart.pitch === midi;
+    const holding = state.holdStart?.type === "note" && state.holdStart.pitch === midi;
     keyboardCtx.fillStyle = holding ? "rgba(255,51,85,0.92)" : active ? "#00c888" : "#15151d";
     keyboardCtx.fillRect(0, y, w * 0.66, semH * 0.64);
     keyboardCtx.strokeStyle = "#050508";
@@ -731,11 +727,18 @@ function drawRoll() {
 
   if (state.holdStart) {
     const elapsedTicks = Math.max(gridTicks(), secondsToTicks((performance.now() - state.holdStart.timeMs) / 1000));
-    drawRollNote({
-      pitch: state.holdStart.pitch,
-      startTick: state.holdStart.startTick,
-      durationTicks: elapsedTicks
-    }, "rgba(255,51,85,0.72)", "rgba(255,150,165,0.92)");
+    if (state.holdStart.type === "rest") {
+      drawRollRest({
+        startTick: state.holdStart.startTick,
+        durationTicks: elapsedTicks
+      });
+    } else {
+      drawRollNote({
+        pitch: state.holdStart.pitch,
+        startTick: state.holdStart.startTick,
+        durationTicks: elapsedTicks
+      }, "rgba(255,51,85,0.72)", "rgba(255,150,165,0.92)");
+    }
   }
 
   const cursorX = tickToX(state.currentTick);
@@ -1085,7 +1088,6 @@ function audioLoop() {
     state.lastBuffer = buffer;
     state.lastPitchProcessMs = now;
     updatePitch(detectPitch(buffer, state.audioCtx.sampleRate));
-    captureHoldPitchSample();
   }
 
   if (now - state.lastVisualDrawMs >= visualDrawIntervalMs()) {
@@ -1123,7 +1125,7 @@ async function startAudio() {
     state.lastVisualDrawMs = 0;
     els.btnStart.textContent = "■ 停止";
     els.btnStart.classList.add("active");
-    els.statusText.textContent = "音声検出中";
+    els.statusText.textContent = "音程モニター中";
     updateInputEnabled();
     state.rafId = requestAnimationFrame(audioLoop);
   } catch (error) {
@@ -1143,7 +1145,6 @@ function stopAudio() {
   state.holdStart = null;
   state.recordOverlayActive = false;
   state.lastStablePitch = null;
-  state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
   updatePitch(null);
   els.btnStart.textContent = "▶ 開始";
@@ -1225,7 +1226,6 @@ function addStepNote() {
   state.notes.push(note);
   state.selectedNoteId = note.id;
   state.currentTick += note.durationTicks;
-  state.lastHoldEndTimeMs = null;
   pushHistory({ type: "add-note", noteId: note.id });
   els.statusText.textContent = "入力: " + midiToNoteName(pitch);
   renderAll();
@@ -1241,66 +1241,41 @@ function addRest() {
   const rest = createRest(state.currentTick, ticks);
   state.rests.push(rest);
   state.currentTick += ticks;
-  state.lastHoldEndTimeMs = null;
   pushHistory({ type: "add-rest", restId: rest.id });
   els.statusText.textContent = "休符: " + durationLabel();
   renderAll();
 }
 
-function captureHoldPitchSample() {
-  if (!state.holdStart) return;
-  const pitchInfo = currentPitchForInputInfo();
-  if (!pitchInfo) return;
-  state.holdStart.samples.push({ pitch: pitchInfo.pitch, clarity: pitchInfo.clarity });
-  const limit = holdPitchSampleLimit();
-  if (state.holdStart.samples.length > limit) {
-    state.holdStart.samples.splice(0, state.holdStart.samples.length - limit);
-  }
+function setOverlayPadPressed(type, pressed) {
+  if (type === "note" && els.overlayNotePad) els.overlayNotePad.classList.toggle("pressed", pressed);
+  if (type === "rest" && els.overlayRestPad) els.overlayRestPad.classList.toggle("pressed", pressed);
 }
 
-function resolveHoldPitch() {
-  if (!state.holdStart || !state.holdStart.samples.length) return state.holdStart?.pitch ?? null;
-  let weighted = 0;
-  let weightSum = 0;
-  for (const sample of state.holdStart.samples) {
-    const weight = Math.max(0.25, sample.clarity || 0.5);
-    weighted += sample.pitch * weight;
-    weightSum += weight;
-  }
-  return weightSum > 0 ? nearestMidi(weighted / weightSum) : state.holdStart.pitch;
-}
-
-function applyHoldGap(nowMs) {
-  if (state.mode !== "hold" || state.lastHoldEndTimeMs == null || !state.notes.length) return;
-  const elapsedSec = Math.max(0, (nowMs - state.lastHoldEndTimeMs) / 1000);
-  const rawTicks = secondsToTicks(elapsedSec);
-  const grid = gridTicks();
-  const gapTicks = Math.round(rawTicks / grid) * grid;
-  if (gapTicks < grid) return;
-  if (hasTimelineOverlap(state.currentTick, gapTicks)) return;
-  state.currentTick += gapTicks;
-}
-
-function startHoldInput() {
+function startHoldInput(type = "note") {
   if (state.mode !== "hold" || state.holdStart) return;
   readBpm();
   const nowMs = performance.now();
-  const pitchInfo = currentPitchForInputInfo();
-  if (!pitchInfo) {
-    els.statusText.textContent = "音程が安定していません";
-    updateOverlayReadout();
-    return;
-  }
-  const pitch = pitchInfo.pitch;
-  applyHoldGap(nowMs);
   state.holdStart = {
-    pitch,
+    type,
     startTick: state.currentTick,
-    timeMs: nowMs,
-    samples: [{ pitch, clarity: pitchInfo.clarity }]
+    timeMs: nowMs
   };
+  if (type === "note") {
+    const pitchInfo = currentPitchForInputInfo();
+    if (!pitchInfo) {
+      state.holdStart = null;
+      els.statusText.textContent = "音程が安定していません";
+      updateOverlayReadout();
+      return;
+    }
+    state.holdStart.pitch = pitchInfo.pitch;
+    els.statusText.textContent = "長さ入力中: " + midiToNoteName(pitchInfo.pitch);
+  } else {
+    state.selectedNoteId = null;
+    els.statusText.textContent = "休符の長さ入力中";
+  }
   setRecordButtonsPressed(true);
-  els.statusText.textContent = "記録中: " + midiToNoteName(pitch);
+  setOverlayPadPressed(type, true);
   updateOverlayReadout();
   drawRoll();
 }
@@ -1309,26 +1284,36 @@ function finishHoldInput() {
   if (!state.holdStart) return;
   readBpm();
   const nowMs = performance.now();
-  captureHoldPitchSample();
   const elapsedSec = (nowMs - state.holdStart.timeMs) / 1000;
   const duration = quantizeTicks(secondsToTicks(elapsedSec));
-  const pitch = resolveHoldPitch();
-  const note = createNote(pitch, state.holdStart.startTick, duration);
-  if (hasTimelineOverlap(note.startTick, note.durationTicks)) {
+  const hold = state.holdStart;
+  const item = hold.type === "rest"
+    ? createRest(hold.startTick, duration)
+    : createNote(hold.pitch, hold.startTick, duration);
+  if (hasTimelineOverlap(item.startTick, item.durationTicks)) {
     setRecordButtonsPressed(false);
+    setOverlayPadPressed(hold.type, false);
     state.holdStart = null;
-    els.statusText.textContent = "重なる位置には入力できません";
+    els.statusText.textContent = hold.type === "rest" ? "重なる位置には休符を入力できません" : "重なる位置には入力できません";
     renderAll();
     return;
   }
-  state.notes.push(note);
-  state.selectedNoteId = note.id;
-  state.currentTick = note.startTick + note.durationTicks;
-  pushHistory({ type: "add-note", noteId: note.id });
+  if (hold.type === "rest") {
+    state.rests.push(item);
+    state.selectedNoteId = null;
+    pushHistory({ type: "add-rest", restId: item.id });
+  } else {
+    state.notes.push(item);
+    state.selectedNoteId = item.id;
+    pushHistory({ type: "add-note", noteId: item.id });
+  }
+  state.currentTick = item.startTick + item.durationTicks;
   setRecordButtonsPressed(false);
+  setOverlayPadPressed(hold.type, false);
   state.holdStart = null;
-  state.lastHoldEndTimeMs = nowMs;
-  els.statusText.textContent = "確定: " + midiToNoteName(note.pitch) + " " + ticksToBeats(note.durationTicks);
+  els.statusText.textContent = hold.type === "rest"
+    ? "休符を確定: " + ticksToBeats(item.durationTicks)
+    : "確定: " + midiToNoteName(item.pitch) + " " + ticksToBeats(item.durationTicks);
   updateOverlayReadout();
   renderAll();
 }
@@ -1469,11 +1454,10 @@ function clearAll() {
   state.holdStart = null;
   state.recordOverlayActive = false;
   state.lastStablePitch = null;
-  state.lastHoldEndTimeMs = null;
   state.activePointerId = null;
   els.recordOverlay.classList.add("hidden");
   els.recordOverlay.setAttribute("aria-hidden", "true");
-  els.statusText.textContent = "記録をクリアしました";
+  els.statusText.textContent = "入力をクリアしました";
   renderAll();
 }
 
@@ -1586,6 +1570,7 @@ function downloadMidi() {
 
 function handleInputPress() {
   if (state.mode === "step") addStepNote();
+  else if (state.recordOverlayActive) startHoldInput("note");
   else setRecordOverlayActive(true);
 }
 
@@ -1593,7 +1578,7 @@ function handleInputRelease() {
   if (state.mode === "hold") finishHoldInput();
 }
 
-function handleOverlayPointerDown(event) {
+function handleOverlayPointerDown(event, type) {
   if (!state.recordOverlayActive) return;
   if (event.button != null && event.button !== 0) return;
   if (state.activePointerId != null) return;
@@ -1604,7 +1589,7 @@ function handleOverlayPointerDown(event) {
   } catch {
     // Some browsers do not allow capture after a disabled-to-enabled transition.
   }
-  startHoldInput();
+  startHoldInput(type);
 }
 
 function handleOverlayPointerEnd(event) {
@@ -1634,10 +1619,14 @@ els.modeStep.addEventListener("click", () => setMode("step"));
 els.modeHold.addEventListener("click", () => setMode("hold"));
 els.btnInput.addEventListener("click", handleInputPress);
 els.btnRecordMode.addEventListener("click", () => setRecordOverlayActive(true));
-els.recordTouchSurface.addEventListener("pointerdown", handleOverlayPointerDown);
-els.recordTouchSurface.addEventListener("pointerup", handleOverlayPointerEnd);
-els.recordTouchSurface.addEventListener("pointercancel", handleOverlayPointerEnd);
-els.recordTouchSurface.addEventListener("lostpointercapture", handleOverlayPointerEnd);
+els.overlayNotePad.addEventListener("pointerdown", event => handleOverlayPointerDown(event, "note"));
+els.overlayNotePad.addEventListener("pointerup", handleOverlayPointerEnd);
+els.overlayNotePad.addEventListener("pointercancel", handleOverlayPointerEnd);
+els.overlayNotePad.addEventListener("lostpointercapture", handleOverlayPointerEnd);
+els.overlayRestPad.addEventListener("pointerdown", event => handleOverlayPointerDown(event, "rest"));
+els.overlayRestPad.addEventListener("pointerup", handleOverlayPointerEnd);
+els.overlayRestPad.addEventListener("pointercancel", handleOverlayPointerEnd);
+els.overlayRestPad.addEventListener("lostpointercapture", handleOverlayPointerEnd);
 els.btnOverlayStop.addEventListener("pointerdown", event => event.stopPropagation());
 els.btnOverlayStop.addEventListener("click", event => {
   event.stopPropagation();
@@ -1741,11 +1730,9 @@ window.__humToMidiTest = {
   effectiveCanvasDpr,
   pitchProcessIntervalMs,
   visualDrawIntervalMs,
-  holdPitchSampleLimit,
   recentAveragePitch,
-  captureHoldPitchSample,
-  resolveHoldPitch,
-  applyHoldGap,
+  startHoldInput,
+  finishHoldInput,
   appendVlq,
   durationTicks,
   gridTicks,

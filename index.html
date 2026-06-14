@@ -399,7 +399,8 @@
   #record-touch-surface {
     min-height: 0;
     display: grid;
-    place-items: center;
+    align-content: center;
+    gap: 22px;
     padding: calc(28px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 18px max(18px, env(safe-area-inset-left));
     text-align: center;
     touch-action: none;
@@ -432,12 +433,57 @@
     letter-spacing: 0.08em;
   }
 
+  .overlay-actions {
+    width: min(620px, 100%);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 12px;
+  }
+
+  .overlay-pad {
+    min-height: 108px;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    touch-action: none;
+  }
+
+  #overlay-note-pad {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,229,160,0.08);
+  }
+
+  #overlay-rest-pad {
+    border-color: var(--accent-3);
+    color: #cbc5ff;
+    background: rgba(124,106,255,0.1);
+  }
+
+  .overlay-pad.pressed {
+    transform: scale(0.98);
+    filter: brightness(1.35);
+  }
+
   #record-overlay.recording {
     background: rgba(30,0,8,0.88);
   }
 
   #record-overlay.recording #overlay-note {
     color: #ffb4c0;
+  }
+
+  #record-overlay.recording.resting {
+    background: rgba(17,10,42,0.88);
+  }
+
+  #record-overlay.recording.resting #overlay-note {
+    color: #cbc5ff;
   }
 
   #record-overlay-controls {
@@ -616,6 +662,15 @@
       font-size: 76px;
     }
 
+    .overlay-actions {
+      gap: 8px;
+    }
+
+    .overlay-pad {
+      min-height: 88px;
+      font-size: 24px;
+    }
+
     #statusbar {
       font-size: 9px;
       line-height: 1.35;
@@ -626,7 +681,7 @@
 <body>
 <header>
   <h1>HumTap <span>MIDI</span></h1>
-  <p>TAP / HOLD PITCH CAPTURE</p>
+  <p>VOICE PITCH STEP INPUT</p>
 </header>
 
 <main>
@@ -661,7 +716,7 @@
   </div>
 
   <div id="record-launch">
-    <button class="btn record-mode-btn" id="btn-record-mode" disabled>録音モード</button>
+    <button class="btn record-mode-btn" id="btn-record-mode" disabled>ホールド入力</button>
   </div>
 
   <div id="controls">
@@ -677,7 +732,7 @@
         <button type="button" id="mode-hold" class="active">HOLD</button>
       </div>
       <div class="button-row" style="margin-top:8px">
-        <button class="btn primary" id="btn-input" disabled>HOLD REC</button>
+        <button class="btn primary" id="btn-input" disabled>TAP</button>
         <button class="btn secondary" id="btn-rest">REST</button>
       </div>
     </div>
@@ -727,6 +782,10 @@
       <div id="overlay-note">—</div>
       <div id="overlay-state">READY</div>
       <div id="overlay-count">NOTES 0</div>
+    </div>
+    <div class="overlay-actions">
+      <button class="overlay-pad" id="overlay-note-pad" type="button">NOTE</button>
+      <button class="overlay-pad" id="overlay-rest-pad" type="button">REST</button>
     </div>
   </div>
   <div id="record-overlay-controls">
