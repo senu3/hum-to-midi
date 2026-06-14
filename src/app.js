@@ -224,6 +224,47 @@ function cloneRest(rest) {
   return { ...rest };
 }
 
+function scaleTickValue(value, ratio) {
+  return Math.max(0, Math.round(value * ratio));
+}
+
+function scaleTimedItem(item, ratio) {
+  const startTick = scaleTickValue(item.startTick, ratio);
+  const endTick = scaleTickValue(item.startTick + item.durationTicks, ratio);
+  return {
+    ...item,
+    startTick,
+    durationTicks: Math.max(1, endTick - startTick)
+  };
+}
+
+function scaleTimelineSnapshot(snapshot, ratio) {
+  return {
+    ...snapshot,
+    notes: snapshot.notes.map(note => scaleTimedItem(note, ratio)),
+    rests: snapshot.rests.map(rest => scaleTimedItem(rest, ratio)),
+    currentTick: scaleTickValue(snapshot.currentTick, ratio)
+  };
+}
+
+function scaleHistoryEntry(entry, ratio) {
+  if (entry.note) entry.note = scaleTimedItem(entry.note, ratio);
+  if (entry.rest) entry.rest = scaleTimedItem(entry.rest, ratio);
+  if (entry.before?.notes && entry.before?.rests) entry.before = scaleTimelineSnapshot(entry.before, ratio);
+  else if (entry.before?.startTick != null && entry.before?.durationTicks != null) entry.before = scaleTimedItem(entry.before, ratio);
+  if (entry.after?.notes && entry.after?.rests) entry.after = scaleTimelineSnapshot(entry.after, ratio);
+  else if (entry.after?.startTick != null && entry.after?.durationTicks != null) entry.after = scaleTimedItem(entry.after, ratio);
+}
+
+function scaleTimelineTicks(ratio) {
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio === 1) return;
+  state.notes = state.notes.map(note => scaleTimedItem(note, ratio));
+  state.rests = state.rests.map(rest => scaleTimedItem(rest, ratio));
+  state.currentTick = scaleTickValue(state.currentTick, ratio);
+  if (state.holdStart) state.holdStart.startTick = scaleTickValue(state.holdStart.startTick, ratio);
+  for (const entry of state.history) scaleHistoryEntry(entry, ratio);
+}
+
 function timelineItems(options = {}) {
   const excludeType = options.excludeType || null;
   const excludeId = options.excludeId || null;
@@ -326,9 +367,14 @@ function restoreRest(snapshot) {
 
 function readBpm() {
   const next = clamp(Number.parseInt(els.bpmInput.value, 10) || DEFAULT_BPM, 30, 240);
+  const previous = state.bpm;
+  if (state.view.stretchMode !== "free" && next !== previous) {
+    scaleTimelineTicks(next / previous);
+  }
   state.bpm = next;
   els.bpmInput.value = String(next);
   updateSummary();
+  updateNotesList();
   drawRoll();
 }
 
@@ -1630,6 +1676,7 @@ window.__humToMidiTest = {
   tickToX,
   xToTick,
   effectivePxPerTick,
+  scaleTimelineTicks,
   readBarScale,
   toggleFreeScale,
   recomputeCurrentTick,
