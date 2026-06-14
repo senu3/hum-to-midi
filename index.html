@@ -754,7 +754,12 @@
   </div>
 </div>
 
-<script type="module" src="./src/app.js"></script>
+<script type="module">
+const params = new URLSearchParams(window.location.search);
+const localHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+const verifyMode = localHost || params.has("verify") || params.has("debug") || params.has("no-sw");
+import("./src/app.js" + (verifyMode ? "?t=" + Date.now() : ""));
+</script>
 </body>
 </html>
 

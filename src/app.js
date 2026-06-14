@@ -122,6 +122,30 @@ let keyboardCtx = els.keyboard.getContext("2d");
 let scopeCtx = els.scope.getContext("2d");
 let rollCtx = els.roll.getContext("2d");
 
+function hasUrlFlag(name) {
+  return new URLSearchParams(window.location.search).has(name);
+}
+
+function isLocalVerificationHost() {
+  return ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+}
+
+function shouldSkipServiceWorker() {
+  return isLocalVerificationHost() || hasUrlFlag("no-sw") || hasUrlFlag("verify") || hasUrlFlag("debug");
+}
+
+function shouldExposeDebugState() {
+  return isLocalVerificationHost() || hasUrlFlag("verify") || hasUrlFlag("debug");
+}
+
+function onWindowReady(callback) {
+  if (document.readyState === "loading") {
+    window.addEventListener("load", callback, { once: true });
+  } else {
+    callback();
+  }
+}
+
 function isCompactViewport() {
   return window.matchMedia("(max-width: 720px)").matches;
 }
@@ -376,6 +400,7 @@ function readBpm() {
   updateSummary();
   updateNotesList();
   drawRoll();
+  updateDebugState();
 }
 
 function readBarScale() {
@@ -384,6 +409,7 @@ function readBarScale() {
   els.barScale.value = String(next);
   els.barScaleValue.textContent = next + "%";
   drawRoll();
+  updateDebugState();
 }
 
 function updateStretchControls() {
@@ -397,6 +423,7 @@ function toggleFreeScale() {
   state.view.stretchMode = state.view.stretchMode === "free" ? "bpm" : "free";
   updateStretchControls();
   drawRoll();
+  updateDebugState();
 }
 
 function recordButtons() {
@@ -1491,6 +1518,39 @@ function updateSummary() {
   els.lengthReadout.textContent = bars.toFixed(2) + " bars / " + ticksToSeconds(maxEnd).toFixed(1) + " s";
 }
 
+function updateDebugState() {
+  if (!shouldExposeDebugState()) return;
+  const payload = {
+    bpm: state.bpm,
+    stretchMode: state.view.stretchMode,
+    freeScale: state.view.freeScale,
+    currentTick: state.currentTick,
+    position: els.positionReadout.textContent,
+    length: els.lengthReadout.textContent,
+    noteCount: state.notes.length,
+    notes: state.notes.map(note => ({
+      id: note.id,
+      pitch: note.pitch,
+      name: midiToNoteName(note.pitch),
+      startTick: note.startTick,
+      durationTicks: note.durationTicks,
+      position: formatPosition(note.startTick),
+      beats: ticksToBeats(note.durationTicks)
+    })),
+    rests: state.rests.map(rest => ({
+      id: rest.id,
+      startTick: rest.startTick,
+      durationTicks: rest.durationTicks
+    })),
+    controls: {
+      bpmValue: els.bpmInput.value,
+      freeText: els.btnFreeScale.textContent,
+      barScaleDisabled: els.barScale.disabled
+    }
+  };
+  document.documentElement.dataset.humToMidiDebug = JSON.stringify(payload);
+}
+
 function updateNotesList() {
   els.notesList.innerHTML = "";
   const sorted = [...state.notes].sort(compareNotes);
@@ -1510,6 +1570,7 @@ function renderAll() {
   updateInputEnabled();
   updateOverlayReadout();
   drawRoll();
+  updateDebugState();
 }
 
 function buildMidi(notes) {
@@ -1568,7 +1629,15 @@ function handleOverlayPointerEnd(event) {
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  window.addEventListener("load", () => {
+  onWindowReady(() => {
+    if (shouldSkipServiceWorker()) {
+      navigator.serviceWorker.getRegistrations()
+        .then(registrations => Promise.all(registrations.map(registration => registration.unregister())))
+        .then(() => window.caches ? caches.keys() : [])
+        .then(keys => Promise.all(keys.map(key => caches.delete(key))))
+        .catch(() => {});
+      return;
+    }
     navigator.serviceWorker.register("./service-worker.js").catch(() => {});
   });
 }
@@ -1627,6 +1696,7 @@ els.durationGrid.addEventListener("click", event => {
   }
   els.statusText.textContent = "音価: " + durationLabel();
   drawRoll();
+  updateDebugState();
 });
 
 document.addEventListener("keydown", event => {
@@ -1648,7 +1718,7 @@ document.addEventListener("keyup", event => {
 });
 
 window.addEventListener("resize", resizeCanvases);
-window.addEventListener("load", () => {
+onWindowReady(() => {
   resizeCanvases();
   readBpm();
   readBarScale();
@@ -1677,6 +1747,9 @@ window.__humToMidiTest = {
   xToTick,
   effectivePxPerTick,
   scaleTimelineTicks,
+  updateDebugState,
+  shouldSkipServiceWorker,
+  shouldExposeDebugState,
   readBarScale,
   toggleFreeScale,
   recomputeCurrentTick,
