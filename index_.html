@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HumTap MIDI">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<title>HumTap MIDI</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;600;800&display=swap');
+
+  :root {
+    --bg: #0a0a0c;
+    --panel: #111116;
+    --panel-2: #15151d;
+    --border: #2a2a35;
+    --accent: #00e5a0;
+    --accent-2: #ff6b35;
+    --accent-3: #7c6aff;
+    --danger: #ff3355;
+    --text: #d8d8e8;
+    --muted: #7d7d92;
+    --dim: #555568;
+    --dark: #050508;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Share Tech Mono", Consolas, monospace;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  header {
+    padding: calc(12px + env(safe-area-inset-top)) 20px 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+
+  header h1 {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-weight: 800;
+    font-size: 24px;
+    letter-spacing: 0.06em;
+    color: #fff;
+  }
+
+  header h1 span { color: var(--accent); }
+  header p { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    min-width: 760px;
+  }
+
+  #row-top {
+    display: flex;
+    height: 164px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  canvas { display: block; }
+
+  #keyboard {
+    width: 34px;
+    height: 100%;
+    flex: 0 0 34px;
+  }
+
+  .divider {
+    width: 1px;
+    background: var(--border);
+    flex: 0 0 1px;
+  }
+
+  #scope-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #scope {
+    width: 100%;
+    height: 100%;
+  }
+
+  #scope-label {
+    position: absolute;
+    top: 7px;
+    left: 9px;
+    z-index: 1;
+    color: var(--dim);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  #note-meter {
+    flex: 0 0 170px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 10px 14px;
+  }
+
+  #note-name {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 56px;
+    font-weight: 800;
+    line-height: 0.9;
+    color: var(--accent);
+  }
+
+  #note-name.silent { color: var(--border); }
+  #note-name.unstable { color: var(--accent-2); }
+  #note-freq, #note-cents, #note-stability { color: var(--dim); font-size: 10px; }
+
+  #cents-bar-wrap {
+    width: 100%;
+    height: 5px;
+    margin-top: 4px;
+    position: relative;
+    background: var(--border);
+    border-radius: 999px;
+  }
+
+  #cents-bar-center {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    width: 1px;
+    height: 9px;
+    background: var(--muted);
+    transform: translateX(-50%);
+  }
+
+  #cents-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 5px;
+    height: 100%;
+    background: var(--dim);
+    border-radius: 999px;
+    transform: translateX(-50%);
+  }
+
+  #roll-section {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  #roll-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--dim);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  #roll-header strong { color: var(--text); }
+
+  #roll-wrap {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--panel);
+  }
+
+  #roll {
+    width: 100%;
+    height: 220px;
+    cursor: default;
+  }
+
+  #record-launch {
+    display: block;
+  }
+
+  #controls {
+    display: grid;
+    grid-template-columns: 1fr 1.6fr 1.3fr 1fr;
+    gap: 10px;
+  }
+
+  .ctrl-group {
+    min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+  }
+
+  .ctrl-group label,
+  .ctrl-title {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--dim);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  .button-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  button {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s, transform 0.08s;
+  }
+
+  button:hover:not(:disabled) { background: rgba(255,255,255,0.04); }
+  button:active:not(:disabled), button.pressed { transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: default; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 8px 12px;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+  }
+
+  #btn-start {
+    width: 100%;
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  #btn-start.active {
+    background: var(--accent);
+    color: #00130d;
+  }
+
+  .segmented {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--dark);
+  }
+
+  .segmented button {
+    height: 30px;
+    border: 0;
+    color: var(--muted);
+  }
+
+  .segmented button.active {
+    background: var(--accent-3);
+    color: #fff;
+  }
+
+  .duration-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+  }
+
+  .duration-grid button {
+    min-height: 30px;
+    color: var(--muted);
+  }
+
+  .duration-grid button.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,229,160,0.08);
+  }
+
+  .bpm-row {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 8px;
+    margin-top: 8px;
+    align-items: center;
+  }
+
+  #bpm-input {
+    width: 100%;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--dark);
+    color: var(--text);
+  }
+
+  .stretch-row {
+    display: flex;
+    margin-top: 8px;
+    align-items: center;
+  }
+
+  #btn-free-scale.active {
+    border-color: var(--accent-3);
+    color: var(--accent-3);
+    background: rgba(124,106,255,0.12);
+  }
+
+  .primary {
+    border-color: var(--danger);
+    color: var(--danger);
+    flex: 1 1 130px;
+  }
+
+  .primary.ready {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .secondary {
+    color: var(--muted);
+    flex: 1 1 74px;
+  }
+
+  .export {
+    width: 100%;
+    border-color: var(--accent-3);
+    color: var(--accent-3);
+  }
+
+  .record-mode-btn {
+    width: 100%;
+    min-height: 48px;
+    border-color: var(--accent);
+    background: rgba(0,229,160,0.08);
+    color: var(--accent);
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  .record-mode-btn:disabled {
+    border-color: var(--border);
+    color: var(--muted);
+    background: transparent;
+  }
+
+  #record-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    background: rgba(2,2,4,0.82);
+    color: var(--text);
+    touch-action: none;
+  }
+
+  #record-overlay.hidden {
+    display: none;
+  }
+
+  #record-touch-surface {
+    min-height: 0;
+    display: grid;
+    align-content: center;
+    gap: 22px;
+    padding: calc(28px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 18px max(18px, env(safe-area-inset-left));
+    text-align: center;
+    touch-action: none;
+  }
+
+  .overlay-readout {
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+  }
+
+  #overlay-note {
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 92px;
+    font-weight: 800;
+    line-height: 0.9;
+    color: var(--accent);
+  }
+
+  #overlay-state {
+    min-height: 24px;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+  }
+
+  #overlay-count {
+    color: var(--dim);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+
+  .overlay-actions {
+    width: min(620px, 100%);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 12px;
+  }
+
+  .overlay-pad {
+    min-height: 108px;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    font-family: "Barlow Condensed", Arial, sans-serif;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    touch-action: none;
+  }
+
+  #overlay-note-pad {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,229,160,0.08);
+  }
+
+  #overlay-rest-pad {
+    border-color: var(--accent-3);
+    color: #cbc5ff;
+    background: rgba(124,106,255,0.1);
+  }
+
+  .overlay-pad.pressed {
+    transform: scale(0.98);
+    filter: brightness(1.35);
+  }
+
+  #record-overlay.recording {
+    background: rgba(30,0,8,0.88);
+  }
+
+  #record-overlay.recording #overlay-note {
+    color: #ffb4c0;
+  }
+
+  #record-overlay.recording.resting {
+    background: rgba(17,10,42,0.88);
+  }
+
+  #record-overlay.recording.resting #overlay-note {
+    color: #cbc5ff;
+  }
+
+  #record-overlay-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 12px max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    border-top: 1px solid rgba(255,255,255,0.12);
+    background: rgba(10,10,12,0.94);
+  }
+
+  #btn-overlay-stop {
+    border-color: var(--danger);
+    color: #ffb4c0;
+  }
+
+  #btn-overlay-undo {
+    border-color: var(--accent-3);
+    color: #cbc5ff;
+  }
+
+  #notes-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 64px;
+    overflow-y: auto;
+    margin-top: 8px;
+  }
+
+  .note-chip {
+    border: 1px solid rgba(124,106,255,0.35);
+    border-radius: 2px;
+    background: rgba(124,106,255,0.14);
+    color: #cbc5ff;
+    padding: 2px 5px;
+    font-size: 9px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .note-chip.selected {
+    border-color: var(--accent);
+    background: rgba(0,229,160,0.14);
+    color: var(--accent);
+  }
+
+  #statusbar {
+    padding: 2px 2px 0;
+    color: var(--dim);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+  }
+
+  #status-text { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    main { min-width: 0; }
+    #controls { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 720px) {
+    header {
+      align-items: center;
+      justify-content: space-between;
+      padding-left: max(12px, env(safe-area-inset-left));
+      padding-right: max(12px, env(safe-area-inset-right));
+    }
+
+    header h1 {
+      font-size: 22px;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    header p {
+      max-width: 132px;
+      text-align: right;
+      line-height: 1.25;
+      letter-spacing: 0.04em;
+    }
+
+    main {
+      gap: 9px;
+      padding-top: 10px;
+    }
+
+    #row-top {
+      height: 132px;
+    }
+
+    #keyboard {
+      width: 28px;
+      flex-basis: 28px;
+    }
+
+    #scope-label {
+      font-size: 8px;
+      top: 6px;
+      left: 7px;
+    }
+
+    #note-meter {
+      flex-basis: 112px;
+      padding: 8px 10px;
+      gap: 3px;
+    }
+
+    #note-name {
+      font-size: 42px;
+    }
+
+    #note-freq,
+    #note-cents,
+    #note-stability {
+      font-size: 9px;
+    }
+
+    #roll-header {
+      gap: 8px;
+      font-size: 9px;
+      letter-spacing: 0.03em;
+    }
+
+    #roll-wrap {
+      max-height: 184px;
+    }
+
+    #roll {
+      height: 184px;
+    }
+
+    #controls {
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .ctrl-group {
+      padding: 9px;
+    }
+
+    .input-group {
+      display: none;
+    }
+
+    .timing-group,
+    .edit-group {
+      grid-column: 1 / -1;
+    }
+
+    .duration-grid {
+      grid-template-columns: repeat(5, minmax(42px, 1fr));
+    }
+
+    .duration-grid button,
+    .segmented button,
+    .btn,
+    #bpm-input {
+      min-height: 38px;
+    }
+
+    .button-row {
+      gap: 8px;
+    }
+
+    #notes-list {
+      max-height: 74px;
+      margin-top: 2px;
+    }
+
+    #record-launch {
+      order: 3;
+    }
+
+    #overlay-note {
+      font-size: 76px;
+    }
+
+    .overlay-actions {
+      gap: 8px;
+    }
+
+    .overlay-pad {
+      min-height: 88px;
+      font-size: 24px;
+    }
+
+    #statusbar {
+      font-size: 9px;
+      line-height: 1.35;
+    }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>HumTap <span>MIDI</span></h1>
+  <p>VOICE PITCH STEP INPUT</p>
+</header>
+
+<main>
+  <div id="row-top">
+    <canvas id="keyboard"></canvas>
+    <div class="divider"></div>
+    <div id="scope-area">
+      <span id="scope-label">WAVEFORM / PITCH</span>
+      <canvas id="scope"></canvas>
+    </div>
+    <div class="divider"></div>
+    <div id="note-meter">
+      <div id="note-name" class="silent">—</div>
+      <div id="note-freq">— Hz</div>
+      <div id="note-cents">±0¢</div>
+      <div id="note-stability">NO SIGNAL</div>
+      <div id="cents-bar-wrap">
+        <div id="cents-bar-center"></div>
+        <div id="cents-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="roll-section">
+    <div id="roll-header">
+      <span>NOTES <strong id="note-count">0</strong> / POSITION <strong id="position-readout">1.1.000</strong></span>
+      <span id="length-readout">0 bars / 0.0 s</span>
+    </div>
+    <div id="roll-wrap">
+      <canvas id="roll"></canvas>
+    </div>
+  </div>
+
+  <div id="record-launch">
+    <button class="btn record-mode-btn" id="btn-record-mode" disabled>ホールド入力</button>
+  </div>
+
+  <div id="controls">
+    <div class="ctrl-group mic-group">
+      <label>MICROPHONE</label>
+      <button class="btn" id="btn-start">▶ 開始</button>
+    </div>
+
+    <div class="ctrl-group input-group">
+      <span class="ctrl-title">INPUT MODE</span>
+      <div class="segmented" role="tablist" aria-label="input mode">
+        <button type="button" id="mode-step">STEP</button>
+        <button type="button" id="mode-hold" class="active">HOLD</button>
+      </div>
+      <div class="button-row" style="margin-top:8px">
+        <button class="btn primary" id="btn-input" disabled>TAP</button>
+        <button class="btn secondary" id="btn-rest">REST</button>
+      </div>
+    </div>
+
+    <div class="ctrl-group timing-group">
+      <span class="ctrl-title">NOTE VALUE / TEMPO</span>
+      <div class="duration-grid" id="duration-grid">
+        <button type="button" data-denom="1">1/1</button>
+        <button type="button" data-denom="2">1/2</button>
+        <button type="button" data-denom="4" class="active">1/4</button>
+        <button type="button" data-denom="8">1/8</button>
+        <button type="button" data-denom="16">1/16</button>
+      </div>
+      <div class="bpm-row">
+        <label for="bpm-input" style="margin:0">BPM</label>
+        <input id="bpm-input" type="number" min="30" max="240" step="1" value="120">
+      </div>
+      <div class="stretch-row">
+        <button class="btn secondary" id="btn-free-scale" type="button">FREE</button>
+      </div>
+    </div>
+
+    <div class="ctrl-group edit-group">
+      <label>EDIT / EXPORT</label>
+      <div class="button-row">
+        <button class="btn secondary" id="btn-undo">UNDO</button>
+        <button class="btn secondary" id="btn-delete">DEL</button>
+      </div>
+      <div class="button-row" style="margin-top:6px">
+        <button class="btn secondary" id="btn-fill-gap">FILL GAP</button>
+        <button class="btn secondary" id="btn-compact">COMPACT</button>
+      </div>
+      <div class="button-row" style="margin-top:6px">
+        <button class="btn secondary" id="btn-clear">CLEAR</button>
+        <button class="btn export" id="btn-midi" disabled>⬇ MIDI</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="notes-list"></div>
+  <div id="statusbar">STATUS: <span id="status-text">マイクを開始してください</span></div>
+</main>
+
+<div id="record-overlay" class="hidden" aria-hidden="true">
+  <div id="record-touch-surface">
+    <div class="overlay-readout" aria-live="polite">
+      <div id="overlay-note">—</div>
+      <div id="overlay-state">READY</div>
+      <div id="overlay-count">NOTES 0</div>
+    </div>
+    <div class="overlay-actions">
+      <button class="overlay-pad" id="overlay-note-pad" type="button">NOTE</button>
+      <button class="overlay-pad" id="overlay-rest-pad" type="button">REST</button>
+    </div>
+  </div>
+  <div id="record-overlay-controls">
+    <button class="btn secondary" id="btn-overlay-undo" type="button">UNDO</button>
+    <button class="btn" id="btn-overlay-stop" type="button">停止</button>
+  </div>
+</div>
+
+<script type="module">
+const params = new URLSearchParams(window.location.search);
+const localHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+const verifyMode = localHost || params.has("verify") || params.has("debug") || params.has("no-sw");
+import("./src/app.js" + (verifyMode ? "?t=" + Date.now() : ""));
+</script>
+</body>
+</html>
+
