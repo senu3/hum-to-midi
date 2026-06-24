@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>出庫チャレンジ - ペーパードライバー練習</title>
+<style>
+  :root{
+    --asphalt-1:#2b2e33;
+    --asphalt-2:#1c1e21;
+    --line-white:#e8e6df;
+    --signal-amber:#e8a33d;
+    --signal-red:#c8453a;
+    --signal-green:#4f9d6e;
+    --panel-bg:#15171a;
+    --panel-border:#3a3d42;
+    --text-dim:#8b8f96;
+    --text-bright:#e8e6df;
+    --mono: "SF Mono","Consolas","DejaVu Sans Mono",monospace;
+    --sans: "Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    overflow:hidden; background:var(--asphalt-2);
+    font-family:var(--sans); color:var(--text-bright);
+    touch-action:none; user-select:none; -webkit-user-select:none;
+    position:fixed;
+  }
+  #gameCanvas{
+    position:absolute; top:0; left:0; width:100%; height:100%; display:block;
+    background:var(--asphalt-1);
+  }
+
+  /* ---------- Start / overlay screen ---------- */
+  #startScreen{
+    position:absolute; inset:0; z-index:50;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 38px, rgba(232,230,223,0.04) 38px 40px),
+      var(--asphalt-2);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:28px; text-align:center;
+  }
+  #startScreen.hidden{ display:none; }
+  .badge{
+    font-family:var(--mono); font-size:11px; letter-spacing:0.18em;
+    color:var(--signal-amber); border:1px solid var(--signal-amber);
+    padding:3px 10px; border-radius:2px; margin-bottom:18px;
+  }
+  #startScreen h1{
+    font-size:26px; margin:0 0 6px; font-weight:700; letter-spacing:0.02em;
+  }
+  #startScreen .sub{ color:var(--text-dim); font-size:13px; margin-bottom:26px; }
+  .instr-card{
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+    border-radius:6px; padding:16px 18px; max-width:340px; width:100%;
+    text-align:left; font-size:13px; line-height:1.7; color:var(--text-bright);
+    margin-bottom:22px;
+  }
+  .instr-card .row{ display:flex; gap:10px; margin-bottom:8px; align-items:flex-start; }
+  .instr-card .row:last-child{ margin-bottom:0; }
+  .instr-key{
+    flex:0 0 auto; font-family:var(--mono); font-size:11px; color:var(--signal-amber);
+    border:1px solid var(--signal-amber); border-radius:3px; padding:2px 6px; white-space:nowrap;
+  }
+  #startBtn{
+    font-family:var(--sans); font-size:16px; font-weight:700; letter-spacing:0.04em;
+    color:#1a1a1a; background:var(--signal-amber); border:none;
+    padding:14px 40px; border-radius:4px; cursor:pointer;
+  }
+  #startBtn:active{ filter:brightness(0.9); }
+  #modeNote{ margin-top:14px; font-size:11px; color:var(--text-dim); font-family:var(--mono); min-height:14px; }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:absolute; inset:0; z-index:20; pointer-events:none; }
+  #hud.hidden{ display:none; }
+
+  .panel{
+    pointer-events:auto;
+    background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:6px;
+  }
+
+  #topBar{
+    position:absolute; top:max(10px, env(safe-area-inset-top)); left:10px; right:10px;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+  }
+  #statusPanel{
+    padding:8px 12px; font-family:var(--mono); font-size:12px; color:var(--text-bright);
+    display:flex; gap:14px;
+  }
+  #statusPanel .stat{ display:flex; flex-direction:column; gap:2px; }
+  #statusPanel .stat .lbl{ font-size:9px; color:var(--text-dim); letter-spacing:0.1em; }
+  #statusPanel .stat .val{ font-size:15px; }
+
+  #recalBtn{
+    padding:10px 12px; font-family:var(--mono); font-size:11px; letter-spacing:0.05em;
+    color:var(--text-bright); cursor:pointer; white-space:nowrap;
+  }
+  #recalBtn:active{ filter:brightness(1.4); }
+
+  #wheelWrap{
+    position:absolute; top:max(64px, calc(env(safe-area-inset-top) + 54px)); left:10px;
+    width:84px; height:84px; pointer-events:none;
+  }
+  #wheelSvg{ width:100%; height:100%; transition:none; }
+
+  #invertBtn{
+    position:absolute; top:max(154px, calc(env(safe-area-inset-top) + 144px)); left:10px;
+    width:84px; padding:6px 0; text-align:center;
+    font-family:var(--mono); font-size:10px; color:var(--text-dim); cursor:pointer;
+  }
+  #invertBtn.active{ color:var(--signal-amber); border-color:var(--signal-amber); }
+
+  #debugPanel{
+    position:absolute; top:max(64px, calc(env(safe-area-inset-top) + 54px)); right:10px;
+    padding:8px 10px; font-family:var(--mono); font-size:10px; color:var(--text-dim);
+    line-height:1.6; min-width:120px;
+  }
+  #debugPanel.hidden{ display:none; }
+
+  #brakeBtn{
+    position:absolute; bottom:max(28px, env(safe-area-inset-bottom)); left:50%;
+    transform:translateX(-50%);
+    width:108px; height:108px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #d65a4f, var(--signal-red) 70%);
+    border:3px solid #5a1f1a; color:#fff; font-weight:700; font-size:15px;
+    display:flex; align-items:center; justify-content:center; letter-spacing:0.05em;
+    box-shadow:0 4px 0 #5a1f1a, 0 6px 10px rgba(0,0,0,0.4);
+    pointer-events:auto;
+  }
+  #brakeBtn.pressed{ box-shadow:0 1px 0 #5a1f1a; transform:translateX(-50%) translateY(3px); filter:brightness(1.15); }
+
+  #gearBtn{
+    position:absolute; bottom:max(40px, calc(env(safe-area-inset-bottom) + 12px)); right:18px;
+    width:64px; height:64px; border-radius:50%;
+    background:var(--panel-bg); border:2px solid var(--panel-border);
+    color:var(--text-bright); font-weight:700; font-size:20px; font-family:var(--mono);
+    display:flex; align-items:center; justify-content:center;
+    pointer-events:auto;
+  }
+  #gearBtn.locked{ opacity:0.45; }
+
+  #accelHint{
+    position:absolute; bottom:max(150px, calc(env(safe-area-inset-bottom) + 130px)); left:50%;
+    transform:translateX(-50%); font-size:10px; color:var(--text-dim);
+    font-family:var(--mono); letter-spacing:0.05em; pointer-events:none;
+    text-align:center; width:200px;
+  }
+
+  #toast{
+    position:absolute; top:42%; left:50%; transform:translate(-50%,-50%);
+    padding:14px 28px; border-radius:6px; font-size:18px; font-weight:700;
+    letter-spacing:0.04em; text-align:center; pointer-events:none;
+    opacity:0; transition:opacity 0.15s ease;
+    background:var(--panel-bg); border:1px solid var(--panel-border);
+  }
+  #toast.show{ opacity:1; }
+  #toast.bad{ color:var(--signal-red); border-color:var(--signal-red); }
+  #toast.good{ color:var(--signal-green); border-color:var(--signal-green); }
+
+  #retryBtn{
+    position:absolute; top:54%; left:50%; transform:translate(-50%,0);
+    padding:10px 26px; border-radius:5px; font-size:13px; font-weight:700;
+    background:var(--signal-amber); color:#1a1a1a; border:none;
+    opacity:0; pointer-events:none; transition:opacity 0.15s ease;
+  }
+  #retryBtn.show{ opacity:1; pointer-events:auto; }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topBar">
+    <div id="statusPanel" class="panel">
+      <div class="stat"><span class="lbl">SPEED</span><span class="val" id="speedVal">0 km/h</span></div>
+      <div class="stat"><span class="lbl">GEAR</span><span class="val" id="gearVal">R</span></div>
+    </div>
+    <div id="recalBtn" class="panel">⟳ 再キャリブレーション</div>
+  </div>
+
+  <div id="wheelWrap">
+    <svg id="wheelSvg" viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#3a3d42" stroke-width="6"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="#8b8f96" stroke-width="2"/>
+      <g id="wheelRotor">
+        <line x1="50" y1="14" x2="50" y2="86" stroke="#e8a33d" stroke-width="4" stroke-linecap="round"/>
+        <line x1="14" y1="50" x2="86" y2="50" stroke="#8b8f96" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="50" cy="50" r="6" fill="#e8a33d"/>
+      </g>
+    </svg>
+  </div>
+  <div id="invertBtn" class="panel">操舵反転: OFF</div>
+
+  <div id="debugPanel" class="panel hidden"></div>
+
+  <div id="accelHint">画面タップ長押し = アクセル</div>
+  <div id="brakeBtn" class="panel">BRAKE</div>
+  <div id="gearBtn" class="panel">R</div>
+
+  <div id="toast"></div>
+  <button id="retryBtn">もう一度</button>
+</div>
+
+<div id="startScreen">
+  <div class="badge">PAPER DRIVER TRAINING</div>
+  <h1>出庫チャレンジ</h1>
+  <div class="sub">スマホをハンドルに見立てて、駐車スペースから出てみよう</div>
+
+  <div class="instr-card">
+    <div class="row"><span class="instr-key">回す</span><span>スマホ本体を実際に左右へ回してハンドル操作。ハンドルのように両手で持って回してください。</span></div>
+    <div class="row"><span class="instr-key">長押し</span><span>画面のどこでも長押しでアクセル(現在のギアの方向に進みます)。</span></div>
+    <div class="row"><span class="instr-key">BRAKE</span><span>中央下のボタンでブレーキ。</span></div>
+    <div class="row"><span class="instr-key">D/R</span><span>右下のボタンで前進(D)⇄後退(R)切替。停止中のみ切替できます。</span></div>
+  </div>
+
+  <button id="startBtn">スタート(キャリブレーション)</button>
+  <div id="modeNote"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     CONFIG - 調整用パラメータ。実機テストで合わなければここを調整。
+  ========================================================== */
+  const CONFIG = {
+    pxPerMeter: 26,            // 画面スケール
+    carLength: 4.0,            // 車全長(m)
+    carWidth: 1.75,            // 車全幅(m)
+    wheelBase: 2.55,           // ホイールベース(m) - 旋回半径に直結
+    maxSteerDeg: 33,           // 前輪の最大切れ角(度)
+    steerInputMaxDeg: 60,      // スマホをこの角度まで回すと最大切れ角になる
+    steerSmoothing: 0.22,      // ステアリング入力の平滑化係数(0-1, 大きいほど追従が速い)
+    maxSpeedFwd: 4.0,          // 前進最高速度(m/s) ≒14.4km/h
+    maxSpeedRev: 2.6,          // 後退最高速度(m/s)
+    accel: 2.0,                // アクセル加速度(m/s^2)
+    coastDecel: 1.1,           // 自然減速(エンジンブレーキ相当)
+    brakeDecel: 4.2,           // ブレーキ減速度
+    gearSwitchMaxSpeed: 0.25,  // ギア切替を許す最大速度(m/s)
+  };
+
+  /* =========================================================
+     STAGE DEFINITION (出庫シーン) - ワールド座標(メートル, y下方向が前方)
+  ========================================================== */
+  const STAGE = {
+    // 駐車スロット: 車の初期位置の左右に壁(隣の車を表す)
+    walls: [
+      { x:-5.6, y:-1.0, w:3.6, h:10.0 },  // 左側の隣接車両ブロック
+      { x: 2.0, y:-1.0, w:3.6, h:10.0 },  // 右側の隣接車両ブロック
+    ],
+    startPos:   { x:0, y:2.0, heading: 0 }, // heading=0で車の前方(フロントガラス側)が画面上方向(ワールドyの負方向)を向く
+    goal: { x:-3.2, y:-8.0, w:8.4, h:4.0 },        // 通路(画面奥)に出てまっすぐ並んだらクリア
+    goalHeadingTargetDeg: 180, // 出庫はバック(R)で行うため、車の前方は画面下を向いたまま通路に出る想定 → heading≈180度を期待
+    worldBounds: { x:-9, y:-14, w:18, h:20 },
+  };
+
+  /* =========================================================
+     STATE
+  ========================================================== */
+  let canvas, ctx;
+  let dpr = Math.min(window.devicePixelRatio||1, 2);
+  let camScale = CONFIG.pxPerMeter;
+
+  let useMotion = false;
+  let rawAngleDeg = null;
+  let baselineAngleDeg = 0;
+  let smoothedSteerDeg = 0;
+  let invertSteer = false;
+
+  let keyLeft=false, keyRight=false, keyAccel=false, keyBrake=false;
+  let pointerAccelCount = 0; // active accelerator touches on background
+
+  let car = null;
+  let gameState = "playing"; // playing | crashed | cleared
+  let debugVisible = false;
+  let lastTime = null;
+
+  function resetCar(){
+    car = {
+      x: STAGE.startPos.x,
+      y: STAGE.startPos.y,
+      heading: STAGE.startPos.heading,
+      speed: 0,
+      steerAngle: 0, // 実際の前輪角(ラジアン, 平滑化後の物理量)
+      gear: -1, // -1 = R (出庫はまずバックから), 1 = D
+    };
+    gameState = "playing";
+    hideToast();
+  }
+
+  /* =========================================================
+     CANVAS SETUP
+  ========================================================== */
+  function setupCanvas(){
+    canvas = document.getElementById("gameCanvas");
+    ctx = canvas.getContext("2d");
+    resize();
+    window.addEventListener("resize", resize);
+  }
+  function resize(){
+    const w = window.innerWidth, h = window.innerHeight;
+    dpr = Math.min(window.devicePixelRatio||1, 2);
+    canvas.width = w*dpr; canvas.height = h*dpr;
+    canvas.style.width = w+"px"; canvas.style.height = h+"px";
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+
+  /* =========================================================
+     SENSOR HANDLING (devicemotion - gravity vector roll angle)
+  ========================================================== */
+  function onMotion(e){
+    const acc = e.accelerationIncludingGravity;
+    if(!acc || acc.x===null || acc.x===undefined) return;
+    // 画面平面内での重力ベクトルの向き = スマホの回転(ロール)角
+    let ang = Math.atan2(acc.x, acc.y) * 180/Math.PI;
+    rawAngleDeg = ang;
+  }
+
+  function angleDiff(a,b){
+    let d = a-b;
+    while(d>180) d-=360;
+    while(d<-180) d+=360;
+    return d;
+  }
+
+  function calibrate(){
+    if(rawAngleDeg!==null){
+      baselineAngleDeg = rawAngleDeg;
+    }
+    smoothedSteerDeg = 0;
+    flashToast("キャリブレーション完了", "good", 700);
+  }
+
+  async function requestMotionPermission(){
+    if(typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function"){
+      try{
+        const res = await DeviceMotionEvent.requestPermission();
+        return res === "granted";
+      }catch(err){
+        return false;
+      }
+    }
+    // Android等、許可APIが無い場合はそのまま使える(HTTPS前提)
+    return (typeof DeviceMotionEvent !== "undefined");
+  }
+
+  /* =========================================================
+     INPUT - keyboard fallback (PC確認用)
+  ========================================================== */
+  window.addEventListener("keydown", (e)=>{
+    if(e.code==="ArrowLeft") keyLeft=true;
+    if(e.code==="ArrowRight") keyRight=true;
+    if(e.code==="ArrowUp"||e.code==="Space") keyAccel=true;
+    if(e.code==="ArrowDown") keyBrake=true;
+  });
+  window.addEventListener("keyup", (e)=>{
+    if(e.code==="ArrowLeft") keyLeft=false;
+    if(e.code==="ArrowRight") keyRight=false;
+    if(e.code==="ArrowUp"||e.code==="Space") keyAccel=false;
+    if(e.code==="ArrowDown") keyBrake=false;
+  });
+
+  /* =========================================================
+     INPUT - pointer (touch/mouse unified)
+  ========================================================== */
+  function setupPointerInputs(){
+    const cv = canvas;
+    cv.addEventListener("pointerdown", (e)=>{ pointerAccelCount++; cv.setPointerCapture && safeCapture(cv,e.pointerId); });
+    cv.addEventListener("pointerup", (e)=>{ pointerAccelCount = Math.max(0,pointerAccelCount-1); });
+    cv.addEventListener("pointercancel", (e)=>{ pointerAccelCount = Math.max(0,pointerAccelCount-1); });
+    cv.addEventListener("pointerleave", (e)=>{ /* keep counting; capture handles drag-off */ });
+
+    const brake = document.getElementById("brakeBtn");
+    brake.addEventListener("pointerdown", (e)=>{ e.stopPropagation(); keyBrakeBtn=true; brake.classList.add("pressed"); });
+    brake.addEventListener("pointerup", (e)=>{ e.stopPropagation(); keyBrakeBtn=false; brake.classList.remove("pressed"); });
+    brake.addEventListener("pointercancel", (e)=>{ keyBrakeBtn=false; brake.classList.remove("pressed"); });
+    brake.addEventListener("pointerleave", (e)=>{ keyBrakeBtn=false; brake.classList.remove("pressed"); });
+
+    const gearBtn = document.getElementById("gearBtn");
+    gearBtn.addEventListener("pointerdown", (e)=>{
+      e.stopPropagation();
+      if(!car) return;
+      if(Math.abs(car.speed) > CONFIG.gearSwitchMaxSpeed){
+        flashToast("停止してから切替してください", "bad", 800);
+        return;
+      }
+      car.gear *= -1;
+      document.getElementById("gearVal").textContent = car.gear>0 ? "D" : "R";
+      gearBtn.textContent = car.gear>0 ? "D" : "R";
+    });
+
+    document.getElementById("recalBtn").addEventListener("pointerdown", (e)=>{ e.stopPropagation(); calibrate(); });
+    const invBtn = document.getElementById("invertBtn");
+    invBtn.addEventListener("pointerdown", (e)=>{
+      e.stopPropagation();
+      invertSteer = !invertSteer;
+      invBtn.textContent = "操舵反転: " + (invertSteer?"ON":"OFF");
+      invBtn.classList.toggle("active", invertSteer);
+    });
+
+    document.getElementById("retryBtn").addEventListener("pointerdown", (e)=>{
+      e.stopPropagation();
+      resetCar();
+      document.getElementById("retryBtn").classList.remove("show");
+    });
+  }
+  function safeCapture(el,id){ try{ el.setPointerCapture(id); }catch(e){} }
+  let keyBrakeBtn = false;
+
+  /* =========================================================
+     PHYSICS UPDATE
+  ========================================================== */
+  function updateSteeringInput(dt){
+    let targetDeg = 0;
+    if(useMotion && rawAngleDeg!==null){
+      let rel = angleDiff(rawAngleDeg, baselineAngleDeg);
+      if(invertSteer) rel = -rel;
+      targetDeg = Math.max(-CONFIG.steerInputMaxDeg, Math.min(CONFIG.steerInputMaxDeg, rel));
+    } else {
+      // keyboard fallback
+      let dir = (keyRight?1:0) - (keyLeft?1:0);
+      if(invertSteer) dir = -dir;
+      targetDeg = dir * CONFIG.steerInputMaxDeg;
+    }
+    const k = CONFIG.steerSmoothing;
+    smoothedSteerDeg += (targetDeg - smoothedSteerDeg) * Math.min(1, k + dt*2);
+  }
+
+  function rectCorners(cx,cy,w,h,heading){
+    const hw=w/2, hh=h/2;
+    const c=Math.cos(heading), s=Math.sin(heading);
+    const local=[[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]];
+    return local.map(([lx,ly])=>({ x: cx + lx*c - ly*s, y: cy + lx*s + ly*c }));
+  }
+
+  // SAT collision between two convex polygons (arrays of {x,y})
+  function polygonsIntersect(polyA, polyB){
+    const polys=[polyA,polyB];
+    for(const poly of polys){
+      for(let i=0;i<poly.length;i++){
+        const p1=poly[i], p2=poly[(i+1)%poly.length];
+        const nx = -(p2.y-p1.y), ny = (p2.x-p1.x);
+        let minA=Infinity,maxA=-Infinity;
+        for(const p of polyA){ const d=p.x*nx+p.y*ny; if(d<minA)minA=d; if(d>maxA)maxA=d; }
+        let minB=Infinity,maxB=-Infinity;
+        for(const p of polyB){ const d=p.x*nx+p.y*ny; if(d<minB)minB=d; if(d>maxB)maxB=d; }
+        if(maxA<minB || maxB<minA) return false;
+      }
+    }
+    return true;
+  }
+
+  function wallToPoly(w){
+    return [
+      {x:w.x,y:w.y},{x:w.x+w.w,y:w.y},
+      {x:w.x+w.w,y:w.y+w.h},{x:w.x,y:w.y+w.h}
+    ];
+  }
+
+  function checkCollision(carPoly){
+    for(const w of STAGE.walls){
+      if(polygonsIntersect(carPoly, wallToPoly(w))) return true;
+    }
+    return false;
+  }
+
+  function checkGoal(){
+    const g=STAGE.goal;
+    const inside = car.x > g.x && car.x < g.x+g.w && car.y > g.y && car.y < g.y+g.h;
+    if(!inside) return false;
+    // ゴール領域内で、車体がレーンに対しほぼ平行(まっすぐ出られた)かを確認。
+    // バック(R)のまま出てきても、切り返して前進(D)で出てきても、
+    // どちらの向きでもまっすぐであればクリアとする。
+    let headingDeg = (car.heading*180/Math.PI);
+    let diffAsIs = Math.abs(angleDiff(headingDeg, STAGE.goalHeadingTargetDeg));
+    let diffFlipped = Math.abs(angleDiff(headingDeg, STAGE.goalHeadingTargetDeg + 180));
+    return Math.min(diffAsIs, diffFlipped) < 28;
+  }
+
+  function update(dt){
+    if(!car) return;
+    updateSteeringInput(dt);
+
+    const steerTargetRad = (smoothedSteerDeg/CONFIG.steerInputMaxDeg) * (CONFIG.maxSteerDeg*Math.PI/180);
+    car.steerAngle = steerTargetRad;
+
+    if(gameState === "playing"){
+      const accelOn = (pointerAccelCount>0) || keyAccel;
+      const brakeOn = keyBrakeBtn || keyBrake;
+
+      const dir = car.gear; // 1=forward target positive speed, -1=reverse target negative
+      const maxSpd = dir>0 ? CONFIG.maxSpeedFwd : CONFIG.maxSpeedRev;
+
+      if(brakeOn){
+        const sign = car.speed>0?1:(car.speed<0?-1:0);
+        car.speed -= sign*CONFIG.brakeDecel*dt;
+        if(Math.sign(car.speed)!==sign) car.speed=0;
+      } else if(accelOn){
+        car.speed += dir*CONFIG.accel*dt;
+        if(dir>0) car.speed = Math.min(car.speed, maxSpd);
+        else car.speed = Math.max(car.speed, -maxSpd);
+      } else {
+        const sign = car.speed>0?1:(car.speed<0?-1:0);
+        car.speed -= sign*CONFIG.coastDecel*dt;
+        if(Math.sign(car.speed)!==sign) car.speed=0;
+      }
+
+      // Kinematic bicycle model
+      const prevX=car.x, prevY=car.y, prevH=car.heading;
+      const L = CONFIG.wheelBase;
+      car.x += car.speed*Math.sin(car.heading)*dt;
+      car.y += -car.speed*Math.cos(car.heading)*dt; // heading=0で前方=画面上方向(ワールドyの負方向)
+      car.heading += (car.speed/L)*Math.tan(car.steerAngle)*dt;
+
+      const poly = rectCorners(car.x,car.y,CONFIG.carWidth,CONFIG.carLength,car.heading);
+      if(checkCollision(poly)){
+        car.x=prevX; car.y=prevY; car.heading=prevH; car.speed=0;
+        gameState="crashed";
+        flashToast("ぶつかりました", "bad", 99999);
+        document.getElementById("retryBtn").classList.add("show");
+      } else if(checkGoal()){
+        gameState="cleared";
+        flashToast("クリア!出庫できました", "good", 99999);
+        document.getElementById("retryBtn").classList.add("show");
+      }
+    }
+
+    // HUD更新
+    document.getElementById("speedVal").textContent = Math.round(Math.abs(car.speed)*3.6) + " km/h";
+    const rotor = document.getElementById("wheelRotor");
+    rotor.setAttribute("transform", `rotate(${smoothedSteerDeg*1.4} 50 50)`);
+    document.getElementById("gearBtn").classList.toggle("locked", Math.abs(car.speed) > CONFIG.gearSwitchMaxSpeed);
+
+    if(debugVisible){
+      document.getElementById("debugPanel").innerHTML =
+        `raw: ${rawAngleDeg===null?"--":rawAngleDeg.toFixed(1)}<br>`+
+        `base: ${baselineAngleDeg.toFixed(1)}<br>`+
+        `steer: ${smoothedSteerDeg.toFixed(1)}deg<br>`+
+        `spd: ${car.speed.toFixed(2)} m/s<br>`+
+        `gear: ${car.gear>0?"D":"R"}<br>`+
+        `pos: ${car.x.toFixed(1)}, ${car.y.toFixed(1)}<br>`+
+        `state: ${gameState}<br>`+
+        `motion: ${useMotion}`;
+    }
+  }
+
+  /* =========================================================
+     RENDER
+  ========================================================== */
+  function worldToScreen(wx,wy){
+    const cx = canvas.width/dpr/2, cy = canvas.height/dpr/2;
+    // カメラは車を中心に追従
+    return {
+      x: cx + (wx - (car?car.x:0))*camScale,
+      y: cy + (wy - (car?car.y:0))*camScale
+    };
+  }
+
+  function drawWorld(){
+    const w = canvas.width/dpr, h = canvas.height/dpr;
+    ctx.clearRect(0,0,w,h);
+
+    // asphalt base
+    ctx.fillStyle = "#2b2e33";
+    ctx.fillRect(0,0,w,h);
+
+    // lane guide lines (vertical dashed) for sense of motion/space
+    ctx.save();
+    ctx.strokeStyle = "rgba(232,230,223,0.10)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([14,14]);
+    for(let lx=-12; lx<=12; lx+=4){
+      const p1=worldToScreen(lx, -40), p2=worldToScreen(lx, 40);
+      ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+    }
+    ctx.restore();
+
+    // parking slot boundary lines (white)
+    ctx.strokeStyle = "#e8e6df";
+    ctx.lineWidth = 3;
+    const slot = { x:-1.6, y:-1.2, w:3.2, h:6.8 };
+    drawWorldRectStroke(slot);
+
+    // walls (隣接車両ブロック)
+    for(const wdef of STAGE.walls){
+      drawWorldRect(wdef, "#15171a", "#3a3d42");
+    }
+
+    // goal zone
+    drawGoalZone();
+
+    // car
+    drawCar();
+  }
+
+  function drawWorldRect(rectDef, fill, stroke){
+    const corners = [
+      {x:rectDef.x,y:rectDef.y},{x:rectDef.x+rectDef.w,y:rectDef.y},
+      {x:rectDef.x+rectDef.w,y:rectDef.y+rectDef.h},{x:rectDef.x,y:rectDef.y+rectDef.h}
+    ].map(p=>worldToScreen(p.x,p.y));
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x,corners[0].y);
+    for(let i=1;i<corners.length;i++) ctx.lineTo(corners[i].x,corners[i].y);
+    ctx.closePath();
+    if(fill){ ctx.fillStyle=fill; ctx.fill(); }
+    if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=2; ctx.stroke(); }
+  }
+  function drawWorldRectStroke(rectDef){
+    drawWorldRect(rectDef, null, "#e8e6df");
+  }
+
+  function drawGoalZone(){
+    const g = STAGE.goal;
+    ctx.save();
+    const isCleared = gameState==="cleared";
+    drawWorldRect(g, isCleared?"rgba(79,157,110,0.35)":"rgba(79,157,110,0.14)", "rgba(79,157,110,0.6)");
+    const center = worldToScreen(g.x+g.w/2, g.y+g.h/2);
+    ctx.fillStyle="#4f9d6e"; ctx.font="bold 13px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("ゴール", center.x, center.y);
+    ctx.restore();
+  }
+
+  function drawCar(){
+    if(!car) return;
+    const p = worldToScreen(car.x, car.y);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(car.heading);
+    const L = CONFIG.carLength*camScale, W = CONFIG.carWidth*camScale;
+
+    // body
+    ctx.fillStyle = gameState==="crashed" ? "#c8453a" : "#3f6fae";
+    roundRectPath(-W/2,-L/2,W,L,6);
+    ctx.fill();
+    ctx.strokeStyle="#1c1e21"; ctx.lineWidth=2; ctx.stroke();
+
+    // windshield: ローカル座標で前方(-y側)に配置。heading=0の時、画面上方向が前方になる。
+    ctx.fillStyle = "rgba(20,24,28,0.55)";
+    roundRectPath(-W*0.34, -L*0.12, W*0.68, L*0.32, 4);
+    ctx.fill();
+
+    // rear window: ローカル+y側(後方)
+    ctx.fillStyle = "rgba(20,24,28,0.4)";
+    roundRectPath(-W*0.3, L*0.26, W*0.6, L*0.18, 3);
+    ctx.fill();
+
+    // wheels (Ackermann-correct front wheel visual angles)
+    const wheelLen = L*0.18, wheelW = W*0.12;
+    const halfTrack = W*0.42;
+    const axleFront = -L*0.32; // 前軸(-y側 = 前方)
+    const axleRear = L*0.32;   // 後軸(+y側 = 後方)
+
+    let innerAngle=0, outerAngle=0;
+    if(Math.abs(car.steerAngle) > 0.001){
+      const turnR = CONFIG.wheelBase/Math.tan(Math.abs(car.steerAngle));
+      const halfTrackM = CONFIG.carWidth*0.42;
+      innerAngle = Math.atan(CONFIG.wheelBase/(turnR-halfTrackM));
+      outerAngle = Math.atan(CONFIG.wheelBase/(turnR+halfTrackM));
+    }
+    const sgn = car.steerAngle>=0?1:-1;
+    const leftFrontAng  = sgn>0 ? innerAngle*sgn : outerAngle*sgn;
+    const rightFrontAng = sgn>0 ? outerAngle*sgn : innerAngle*sgn;
+
+    drawWheel(-halfTrack, axleFront, wheelW, wheelLen, leftFrontAng);
+    drawWheel( halfTrack, axleFront, wheelW, wheelLen, rightFrontAng);
+    drawWheel(-halfTrack, axleRear, wheelW, wheelLen, 0);
+    drawWheel( halfTrack, axleRear, wheelW, wheelLen, 0);
+
+    ctx.restore();
+  }
+
+  function drawWheel(lx,ly,w,h,angle){
+    ctx.save();
+    ctx.translate(lx,ly);
+    ctx.rotate(angle);
+    ctx.fillStyle="#0e0f11";
+    roundRectPath(-w/2,-h/2,w,h,2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function roundRectPath(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  /* =========================================================
+     TOAST
+  ========================================================== */
+  let toastTimer=null;
+  function flashToast(msg, type, ms){
+    const t=document.getElementById("toast");
+    t.textContent=msg;
+    t.className="show "+(type||"");
+    if(toastTimer) clearTimeout(toastTimer);
+    if(ms && ms<99999){
+      toastTimer=setTimeout(hideToast, ms);
+    }
+  }
+  function hideToast(){
+    document.getElementById("toast").className="";
+  }
+
+  /* =========================================================
+     MAIN LOOP
+  ========================================================== */
+  function loop(ts){
+    if(lastTime===null) lastTime=ts;
+    let dt=(ts-lastTime)/1000;
+    lastTime=ts;
+    dt=Math.min(dt,0.05);
+    update(dt);
+    drawWorld();
+    requestAnimationFrame(loop);
+  }
+
+  /* =========================================================
+     座標系メモ
+     heading=0 のとき、車の前方(フロントガラス側)は画面上方向(ワールドyの負方向)を向く。
+     car.x += speed*sin(heading)*dt; car.y += -speed*cos(heading)*dt;
+     スタート地点では gear=-1(R)。出庫は後退から始まる想定。
+  ========================================================== */
+
+  /* =========================================================
+     INIT
+  ========================================================== */
+  function init(){
+    setupCanvas();
+    setupPointerInputs();
+    resetCar();
+
+    document.getElementById("startBtn").addEventListener("click", onStart);
+
+    // デバッグ表示: 画面を3本指タップ、またはキーボード'd'で切替(開発確認用)
+    window.addEventListener("keydown", (e)=>{
+      if(e.key==="d"){
+        debugVisible=!debugVisible;
+        document.getElementById("debugPanel").classList.toggle("hidden", !debugVisible);
+      }
+    });
+
+    requestAnimationFrame(loop);
+  }
+
+  async function onStart(){
+    const modeNote = document.getElementById("modeNote");
+    const hasMotionAPI = (typeof DeviceMotionEvent !== "undefined");
+
+    if(hasMotionAPI){
+      const granted = await requestMotionPermission();
+      if(granted){
+        window.addEventListener("devicemotion", onMotion);
+        useMotion = true;
+        // 数フレーム待ってベースラインを取得
+        setTimeout(()=>{
+          calibrate();
+        }, 200);
+      } else {
+        useMotion = false;
+        modeNote.textContent = "センサーの許可が得られませんでした。矢印キー操作(PC)で続行します。";
+      }
+    } else {
+      useMotion = false;
+      modeNote.textContent = "センサー未対応の環境です。矢印キー(←→)で操作してください。";
+    }
+
+    document.getElementById("startScreen").classList.add("hidden");
+    document.getElementById("hud").classList.remove("hidden");
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
